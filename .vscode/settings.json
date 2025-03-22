@@ -1,0 +1,13 @@
+{
+    "python.defaultInterpreterPath": "venv/bin/python",
+    "python.analysis.typeCheckingMode": "strict",
+    "python.languageServer": "Pylance",
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportUnusedImport": "warning",
+        "reportUnusedExpression": "warning",
+        "reportUnusedVariable": "warning"
+    },
+    "editor.formatOnSave": true,
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": ["tests"]
+}
