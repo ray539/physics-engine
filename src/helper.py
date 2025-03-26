@@ -1,7 +1,5 @@
 from pygame.math import Vector2
 
-
-
 def area_of_polygon(points: list[Vector2]) -> float:
   """
     assume points is labeled in AC order
@@ -18,7 +16,15 @@ def area_of_polygon(points: list[Vector2]) -> float:
   return area
 
 def moment_inertia_of_polygon(points: list[Vector2]) -> float:
+  """
+    gives second moment of area\n
+    https://physics.stackexchange.com/questions/493736/moment-of-inertia-for-an-arbitrary-polygon
+  """
   N = len(points)
+  # need to center the points first
+  com = center_of_mass(points)
+  points = list(map(lambda p: p - com, points))
+  
   inertia = 0
   for i in range(N):
     xi = points[i].x
@@ -26,7 +32,9 @@ def moment_inertia_of_polygon(points: list[Vector2]) -> float:
     yi = points[i].y
     yi1 = points[(i + 1) % N].y
     inertia += (xi*yi1 - xi1*yi) * (xi1*xi1 + xi1*xi + xi*xi + yi1*yi1 + yi1*yi + yi*yi)
+  
   inertia = inertia / 12
+  
   return inertia
 
 def center(points: list[Vector2]) -> Vector2:
@@ -52,13 +60,13 @@ def center_of_mass(points: list[Vector2]) -> Vector2:
 
 def rot_90_ac(vec: Vector2):
   """
-    rotate a vector 90 degrees anticlockwise
+    rotate a vector 90 degrees anticlockwise, assume cartesian x, y axes
   """
   return Vector2(-vec.y, vec.x)
 
 def rot_90_c(vec: Vector2):
   """
-    rotate a vector 90 degrees clockwise
+    rotate a vector 90 degrees clockwise, assume cartesian x, y axes
   """
   return Vector2(vec.y, -vec.x)
 
@@ -66,7 +74,7 @@ def clip(points: list[Vector2], n: Vector2, o: float):
   """
     assume len(points) <= 2\n
     draws line between the points given
-    ensure all points are >= 'o' when projected on n \n
+    clips line such that points are >= 'o' when projected on n \n
     assumes n is unit vector
   """  
   

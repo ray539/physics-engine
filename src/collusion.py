@@ -4,7 +4,6 @@ from constants import COE
 from helper import *
 from classes import Polygon
 
-
 @dataclass
 class CollusionData:
   objA: Polygon
@@ -189,4 +188,3 @@ def resolve_velocity(collusion_data: CollusionData):
   
   objB.linear_velocity = v_b + (-impulse / M_A) * n
   objB.rotational_velocity = wb + (r_ap_perp.dot(-impulse * n)) / I_B
-  # v_ab = collusion_data.objA.linear_velocity - collusion_data.objB.linear_velocity

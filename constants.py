@@ -1,2 +1,0 @@
-GRAVITY = 100
-COE = 0.5
