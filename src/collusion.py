@@ -18,7 +18,6 @@ class CollusionData:
       res += f"{at}: {str(self.__dict__[at])}\n"
     return res
       
-    
 def range_depth(r1: tuple[float, float], r2: tuple[float, float]):
   if r1[0] > r2[0]:
     r1, r2 = r2, r1

@@ -1,7 +1,6 @@
 import sys
 import os
 from typing import cast
-
 # __file__: the location of the current file
 # os.path.dirname: function which extracts directory of file
 # os.path.join: function to join 2 string paths
@@ -61,6 +60,13 @@ def test3():
   cd = collide(a, b)
   print(cd)
   
+def test4():
+  a = Polygon([Vector2(50, 50), Vector2(450, 50), Vector2(450, 100), Vector2(50, 100)])
+  b = Polygon([Vector2(-2.411, 40.0692), Vector2(78.0902, 99.395), Vector2(18.7644, 179.896), Vector2(-61.7368, 120.57)])
+  
+  cd = collide(a, b)
+  print(cd)
+  
 def temp():
   a = Polygon([
     Vector2(50, 50),
@@ -77,6 +83,7 @@ def temp():
   ])
   b.linear_velocity = Vector2(0, -1000)
   cd = collide(a, b)
+  print(cd)
   
 if __name__ == '__main__':
-  test3()
+  test4()

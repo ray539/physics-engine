@@ -38,13 +38,15 @@ class Polygon(RigidBody):
     global_points = self.get_points_global()
     x_min = min(map(lambda p : p.x, global_points))
     y_min = min(map(lambda p : p.y, global_points))
-    p1 = Vector2(x_min, y_min)
+    left_top = Vector2(x_min, y_min)
     
     x_max = max(map(lambda p : p.x, global_points))
     y_max = max(map(lambda p : p.y, global_points))
-    p2 = Vector2(x_max, y_max)
+    width_height = Vector2(x_max - x_min, y_max - y_min)
     
-    return Rect(p1, p2)
+    
+    
+    return Rect(left_top, width_height)
   
   def project_onto_normal(self, normal: Vector2):
     """
