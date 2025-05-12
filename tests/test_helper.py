@@ -5,9 +5,23 @@ import os
 # os.path.join: function to join 2 string paths
 root_dir = os.path.join(os.path.dirname(__file__), '../')
 sys.path.append(root_dir)
-from src.helper import area_of_polygon, center_of_mass, moment_inertia_of_polygon
+from src.helper import area_of_polygon, center_of_mass, moment_inertia_of_polygon, clip
 from pygame.math import Vector2
+from math import isclose
 
+def vector_isclose(rec: Vector2, exp: Vector2, abs_tol: float = 1e-3):
+  return isclose(rec.x - exp.x, 0, abs_tol=abs_tol) and isclose(rec.y - exp.y, 0, abs_tol=abs_tol)
+  
+def vector_list_isclose(rec: list[Vector2], exp: list[Vector2], abs_tol: float = 1e-3):
+  rec.sort(key = lambda p: (p.x, p.y))
+  exp.sort(key = lambda p: (p.x, p.y))
+  if len(rec) != len(exp):
+    return False
+  for i in range(len(rec)):
+    if not vector_isclose(rec[i], exp[i], abs_tol):
+      return False
+  return True
+  
 def test_area_of_polygon():
   # triangle
   assert area_of_polygon([Vector2(0, 0), Vector2(1, 0), Vector2(1,1)]) == 0.5
@@ -21,7 +35,7 @@ def test_area_of_polygon():
   assert area_of_polygon([Vector2(0, 0), Vector2(2, 0), Vector2(3, 1), Vector2(1, 1)]) == 2.0
 
 def test_center_of_mass():
-  from math import isclose
+  
 
   # **Triangle (Base = 2, Height = 2)**
   # Centroid of a triangle with vertices at (0, 0), (2, 0), and (1, 2) is at (1, 2/3)
@@ -74,7 +88,6 @@ def test_center_of_mass():
   assert isclose(centroid.y, 0.0, abs_tol=1e-2)
 
 def test_moment_of_inertia_of_polygon():
-    from math import isclose
     
     square_points = [
         Vector2(-1, -1),
@@ -119,4 +132,24 @@ def test_moment_of_inertia_of_polygon():
     # Since we do not have an exact theoretical value, we simply test that inertia is calculated
     inertia = moment_inertia_of_polygon(pentagon_points)
     assert inertia > 0, f"Failed for Pentagon: {inertia}"
-    
+
+def test_clip():
+  points = [Vector2(0, 1), Vector2(3, 2)]
+  n = Vector2(1, 0)
+  o = 1
+  res = clip(points, n, o)
+  exp = [Vector2(1, 4/3), Vector2(3, 2)]
+  assert vector_list_isclose(res, exp, 1e-3)
+  
+  points = [Vector2(3, 2)]
+  res = clip(points, n, 2)
+  exp = [Vector2(3, 2), Vector2(3, 2)]
+  assert vector_list_isclose(res, exp, 1e-3)
+  
+  points = [Vector2(0, 1), Vector2(3, 2)]
+  res = clip(points, n, 3)
+  exp = [Vector2(3, 2)]
+  assert vector_list_isclose(res, exp, 1e-3)
+
+
+

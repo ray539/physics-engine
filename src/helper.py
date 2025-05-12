@@ -1,4 +1,20 @@
+from typing import TypeVar
 from pygame.math import Vector2
+
+from constants import SCREEN_HEIGHT
+
+
+
+T = TypeVar('T', Vector2, list[Vector2])
+def world_to_screen(coord: T) -> T:
+  if isinstance(coord, list):
+    return list(map(lambda p : Vector2(p.x, SCREEN_HEIGHT - p.y), coord))
+  return Vector2(coord.x, SCREEN_HEIGHT - coord.y)
+
+def screen_to_world(coord: Vector2 | list[Vector2]):
+  if isinstance(coord, list):
+    return list(map(lambda p : Vector2(p.x, SCREEN_HEIGHT - p.y), coord))
+  return [Vector2(coord.x, SCREEN_HEIGHT - coord.y)]
 
 def area_of_polygon(points: list[Vector2]) -> float:
   """
@@ -89,6 +105,7 @@ def clip(points: list[Vector2], n: Vector2, o: float):
   d1 = n.dot(v1) - o
   d2 = n.dot(v2) - o
   
+  # print(d1, d2)
   # add valid points
   if d1 >= 0:
     res.append(v1)
@@ -98,8 +115,15 @@ def clip(points: list[Vector2], n: Vector2, o: float):
   if d1 * d2 < 0:
     # they are on opposite sides, so there is one valid point so far
     e = v2 - v1
-    u = d1 / (d1 + d2)
+    u = abs(d1) / (abs(d1) + abs(d2))
     v3 = v1 + u*e
     res.append(v3)
   return res
 
+def get_square(bottom_left: Vector2, size: int):
+  return [
+        bottom_left,
+        bottom_left + Vector2(size, 0),
+        bottom_left + Vector2(size, size),
+        bottom_left + Vector2(0, size)
+  ]

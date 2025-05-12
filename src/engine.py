@@ -1,17 +1,35 @@
+from copy import deepcopy
 from pygame.math import Vector2
 from classes import *
 from collusion import *
 from constants import CONTACT_RESOLVER_MAX_ITERATIONS, VELOCITY_RESOLVER_MAX_ITERATIONS
-  
+from pygame import Surface
+import pygame
+import pickle
 
 class Engine:
   def __init__(self):
-    self.force_generators: list[ForceGenerator] = [GravityForceGenerator(self.bodies)]
     self.bodies: list[Polygon] = []
+    self.force_generators: list[ForceGenerator] = [GravityForceGenerator(self.bodies)]
+    self.timer = 0
+  
+  # def save_state_to_file(self, filepath: str):
+  #   with open('save', 'wb') as f:
+  #     pickle.dump(self.bodies, f)
+  
+  def add_polygonal_body(self, points: list[Vector2], immovable: bool = False):
+    """
+      points: world coordinates\n
+      immovable: self explanatory\n
+      returns the polygonal body created
+    """
+    new_body = Polygon(points, immovable)
+    self.bodies.append(new_body)
+    return new_body
   
   def apply_force(self, target: Polygon, contact_point_world: Vector2, force_vector: Vector2):
     target.apply_force(contact_point_world, force_vector)
-    
+  
   def update(self, dt: float):
     # apply forces
     for force_generator in self.force_generators:
@@ -28,9 +46,10 @@ class Engine:
         tmp = collide(self.bodies[i], self.bodies[j])
         if tmp:
           collusions.append(tmp)
+          
+    ret = deepcopy(collusions)
     
-    # resolve velocity
-    for _ in range(min(VELOCITY_RESOLVER_MAX_ITERATIONS, len(collusions) * 2)):
+    for _ in range(min(VELOCITY_RESOLVER_MAX_ITERATIONS, 2 * len(collusions))):
       mn_sep_val = 0.0 # want this to be negative, or else no objects are colliding
       min_idx = -1
       for i in range(len(collusions)):
@@ -38,9 +57,10 @@ class Engine:
         if sep_val < mn_sep_val:
           mn_sep_val = sep_val
           min_idx = i
+
       if min_idx == -1 or mn_sep_val >= 0:
         break
-      resolve_velocity(collusions[min_idx])
+      resolve_velocity(collusions[min_idx], dt)
     
     
     # resolve interpenetration
@@ -55,3 +75,6 @@ class Engine:
       if max_idx == -1 or mx_penetration <= 0:
         break
       resolve_penetration(collusions[max_idx])
+    
+    return ret
+      

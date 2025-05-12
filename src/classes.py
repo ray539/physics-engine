@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from constants import GRAVITY
 from helper import *
+import math
 
 class RigidBody(ABC):
   def __init__(self):
@@ -22,9 +23,11 @@ class RigidBody(ABC):
     pass
   
 class Polygon(RigidBody):
-  def __init__(self, points: Iterable[Vector2]):
-    self.mass = area_of_polygon(list(points))
-    self.rotational_inertia = moment_inertia_of_polygon(list(points))
+  def __init__(self, points: Iterable[Vector2], immovable: bool = False):
+    super().__init__()
+    self.area = area_of_polygon(list(points))
+    self.mass = area_of_polygon(list(points)) if not immovable else -1
+    self.rotational_inertia = moment_inertia_of_polygon(list(points)) if not immovable else -1
     # polygon
     # - center
     # - points relative to center
@@ -32,13 +35,14 @@ class Polygon(RigidBody):
     self.points_local: list[Vector2] = list(map(lambda p: p - self.center_of_mass, points))
 
   def get_bounding_box_global(self):
-    x_min = min(map(lambda p : p.x, self.points_local))
-    y_min = min(map(lambda p : p.y, self.points_local))
-    p1 = Vector2(x_min, y_min) + self.center_of_mass
+    global_points = self.get_points_global()
+    x_min = min(map(lambda p : p.x, global_points))
+    y_min = min(map(lambda p : p.y, global_points))
+    p1 = Vector2(x_min, y_min)
     
-    x_max = max(map(lambda p : p.x, self.points_local))
-    y_max = max(map(lambda p : p.y, self.points_local))
-    p2 = Vector2(x_max, y_max) + self.center_of_mass
+    x_max = max(map(lambda p : p.x, global_points))
+    y_max = max(map(lambda p : p.y, global_points))
+    p2 = Vector2(x_max, y_max)
     
     return Rect(p1, p2)
   
@@ -51,7 +55,8 @@ class Polygon(RigidBody):
     return (min(dists), max(dists))
   
   def get_points_global(self):
-    return list(map(lambda p: p + self.center_of_mass, self.points_local))
+    return list(map(lambda p: p.rotate_rad(self.rotational_displacement) + self.center_of_mass, self.points_local))
+
 
   def update_unconstrained(self, dt: float) -> None:
     if self.mass < 0:
@@ -62,18 +67,23 @@ class Polygon(RigidBody):
     self.linear_velocity += self.linear_acceleration
     
     self.rotational_displacement += self.rotational_velocity * dt + (1/2) * dt * dt * self.rotational_acceleration
+    self.rotational_displacement %= (2*math.pi)
     self.rotational_velocity += self.rotational_acceleration
-      
+    
   def apply_force(self, contact_point_world: Vector2, force_vector: Vector2) -> None:
     """
       contact_point_world: contact point in world coordinates
     """
+    if self.mass < 0:
+      return
     self.linear_acceleration += force_vector / self.mass
     
     d = contact_point_world - self.center_of_mass
     torque = Vector2.cross(d, force_vector)
     self.rotational_acceleration += torque / self.rotational_inertia
-    
+  
+  def __str__(self):
+      return f"{self.__class__.__name__}({self.__dict__})"
 # ForceGenerator
 # - eg. gravity
 # - attatched to an object
