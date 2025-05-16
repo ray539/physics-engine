@@ -1,6 +1,7 @@
 from dataclasses import dataclass
+from pygame import Rect
 from pygame.math import Vector2
-from constants import COE, THRESHOLD
+from constants import COE
 from helper import *
 from classes import Polygon
 
@@ -22,11 +23,29 @@ def range_depth(r1: tuple[float, float], r2: tuple[float, float]):
   if r1[0] > r2[0]:
     r1, r2 = r2, r1
   return r1[1] - r2[0]
+  
 
-# check if two points collide
-# - if so, return collusion data
-def collide(b1: Polygon, b2: Polygon) -> CollusionData | None:
-  if b1.get_bounding_box_global().colliderect(b2.get_bounding_box_global()):
+def collide(b1: Polygon, b2: Polygon, touch: bool = False) -> CollusionData | None:
+  """
+    get collusion data for two objects. Returns none if not colliding
+    touch: adds a leeway instead of checking for strict collusions
+  """
+  
+  def adjust_rect(rect: Rect, thres: int):
+    """
+      if thres > 0, we expand the rect, else contract it
+    """
+    thres -= 1
+    return Rect((rect.topleft[0] + thres, rect.topleft[1] + thres), (rect.width - 2*thres, rect.height - 2*thres))
+  
+  THRES = -5
+  r1 = b1.get_bounding_box_global()
+  r2 = b2.get_bounding_box_global()
+  if touch:
+    r1 = adjust_rect(r1, THRES)
+    r2 = adjust_rect(r2, THRES)
+  
+  if r1.colliderect(r2):
     points1 = b1.get_points_global()
     points2 = b2.get_points_global()
     L1 = len(points1)
@@ -44,7 +63,6 @@ def collide(b1: Polygon, b2: Polygon) -> CollusionData | None:
     for i in range(L2):
       normal = rot_90_c(points2[(i + 1) % L2] - points2[i]).normalize()
       normals[1][i] = normal
-
     
     min_i = (-1, -1)
     min_d = 1E15
@@ -56,10 +74,15 @@ def collide(b1: Polygon, b2: Polygon) -> CollusionData | None:
         
         # for any normal, we use the SAT,
         abs_depth = range_depth(range1, range2)
-        if abs_depth <= 0:
-          # found a separating axis
-          return None
-
+        
+        # need abs_depth >= thres
+        if touch:
+          if abs_depth < THRES:
+            # found a separating axis
+            return None
+        else:
+          if abs_depth <= 0:
+            return None
         # - collusion normals are defined by a point and a direction
         # - we need range1 to be to the left of range2, otherwise this normal is invalid
         # - otherwise, this is not a valid collusion normal
@@ -84,6 +107,7 @@ def collide(b1: Polygon, b2: Polygon) -> CollusionData | None:
     # print(min_i)
 
     (polyA, i) = min_i
+
     normal = normals[polyA][i]
     
     v0 = points[polyA][i]
@@ -112,7 +136,7 @@ def collide(b1: Polygon, b2: Polygon) -> CollusionData | None:
     
     # w0, w1 is the incident edge
     (w0, w1) = incident
-    collusion_points = clip([w0, w1], direction, Vector2.dot(direction, v0))
+    collusion_points = clip([w0, w1], direction, Vector2.dot(direction, v0)) # may return none
     collusion_points = clip(collusion_points, -direction, Vector2.dot(-direction, v1))
     collusion_points = clip(collusion_points, -normal, Vector2.dot(-normal, v0))
     
@@ -128,7 +152,7 @@ def collide(b1: Polygon, b2: Polygon) -> CollusionData | None:
       objA = polygons[finalA],
       objB = polygons[finalB],
       collusion_normal = normal, # need it to point towards bodyA by convention
-      contact_points= collusion_points,
+      contact_points = collusion_points,
       penetration_depth = min_d,
     )
     return collusion_data
@@ -170,8 +194,8 @@ def resolve_penetration(collusion_data: CollusionData):
   if M_B < 0:
     objA.center_of_mass += d * normal
     return
-  objA.center_of_mass += (d * M_B / (M_A + M_B)) * normal
-  objB.center_of_mass += (-d * M_A / (M_A + M_B)) * normal
+  objA.center_of_mass += (d * (M_B / (M_A + M_B))) * normal
+  objB.center_of_mass += (-d * (M_A / (M_A + M_B))) * normal
 
 def recalculate_separating_velocity(collusion_data: CollusionData):
   """

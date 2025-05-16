@@ -1,7 +1,7 @@
 from typing import TypeVar
 from pygame.math import Vector2
 
-from constants import SCREEN_HEIGHT
+from constants import EPS, SCREEN_HEIGHT
 
 
 
@@ -107,9 +107,9 @@ def clip(points: list[Vector2], n: Vector2, o: float):
   
   # print(d1, d2)
   # add valid points
-  if d1 >= 0:
+  if d1 >= -EPS:
     res.append(v1)
-  if d2 >= 0:
+  if d2 >= -EPS:
     res.append(v2)
   
   if d1 * d2 < 0:
@@ -118,6 +118,9 @@ def clip(points: list[Vector2], n: Vector2, o: float):
     u = abs(d1) / (abs(d1) + abs(d2))
     v3 = v1 + u*e
     res.append(v3)
+  
+  # if len(res) == 0:
+  #   print('warning: clip 0')
   return res
 
 def get_square(bottom_left: Vector2, size: int):
