@@ -5,41 +5,60 @@ from pygame.math import Vector2
 from pygame.surface import Surface
 from collusion import CollusionData, avg, collide
 from constants import GRAVITY, SCREEN_HEIGHT, SCREEN_WIDTH
-from classes import Polygon as engine_Polygon
+from classes import Polygon
 from engine import Engine
 from helper import get_square, rot_90_c, screen_to_world, world_to_screen
 from copy import deepcopy
 
-from ui import label
+from input import MouseEvent
+from ui import UILayer, label
 
-class Polygon:
-  def __init__(self, engine_polygon: engine_Polygon) -> None:
-    """
-      wrapper around engine polygon, including methods to draw
-      points: global (word) coordinates
-    """
-    self.engine_polygon = engine_polygon
-    if self.engine_polygon.mass > 0:
-      if self.engine_polygon.resting:
-        self.fill_color = (0, 255, 0)
-      else:
-        self.fill_color = (255, 0, 0)
-    else:
-      self.fill_color = (0, 0, 255)
+# class Polygon:
+#   def __init__(self, engine_polygon: Polygon) -> None:
+#     """
+#       wrapper around engine polygon, including methods to draw
+#       points: global (word) coordinates
+#     """
+#     self.engine_polygon = engine_polygon
+#     if self.engine_polygon.mass > 0:
+#       # if self.engine_polygon.resting:
+#       #   self.fill_color = (0, 255, 0)
+#       # else:
+#       self.fill_color = (255, 0, 0)
+#     else:
+#       self.fill_color = (0, 0, 255)
 
-    self.border_color = tuple([200 if c == 0 else c for c in self.fill_color])
+#     self.border_color = tuple([200 if c == 0 else c for c in self.fill_color])
 
-  def draw(self, surface: Surface):
-    screen_points = world_to_screen(self.engine_polygon.get_points_global())
-    mid = avg(screen_points)
-    thickness = 2
-    pygame.draw.polygon(surface, self.fill_color, screen_points)
-    lab = label(str(self.engine_polygon.body_id), 'Arial', 10)
-    rect = pygame.Rect((0, 0), (lab.get_width(), lab.get_height()))
-    rect.center = (int(mid.x), int(mid.y))
-    surface.blit(lab, rect)
-    
-    # pygame.draw.polygon(surface, self.border_color, screen_points, thickness)
+#   def draw(self, surface: Surface):
+#     screen_points = world_to_screen(self.engine_polygon.get_points_global())
+#     mid = avg(screen_points)
+#     thickness = 2
+#     pygame.draw.polygon(surface, self.fill_color, screen_points)
+#     lab = label(str(self.engine_polygon.body_id), 'Arial', 10)
+#     rect = pygame.Rect((0, 0), (lab.get_width(), lab.get_height()))
+#     rect.center = (int(mid.x), int(mid.y))
+#     surface.blit(lab, rect)
+
+def draw_polygon(polygon: Polygon, surface: Surface):
+  if polygon.mass > 0:
+    # if self.engine_polygon.resting:
+    #   self.fill_color = (0, 255, 0)
+    # else:
+    fill_color = (255, 0, 0)
+  else:
+    fill_color = (0, 0, 255)
+  border_color = tuple([200 if c == 0 else c for c in fill_color])
+  border_thickness = 2
+  
+  screen_points = world_to_screen(polygon.get_points_global())
+  mid = avg(screen_points)
+  
+  pygame.draw.polygon(surface, fill_color, screen_points)
+  lab = label(str(polygon.body_id), 'Arial', 10)
+  rect = pygame.Rect((0, 0), (lab.get_width(), lab.get_height()))
+  rect.center = (int(mid.x), int(mid.y))
+  surface.blit(lab, rect)
 
 def draw_arrow(start: Vector2, end: Vector2, surface: pygame.Surface):
   pygame.draw.line(surface, (0, 0, 255), world_to_screen(start), world_to_screen(end), 2)
@@ -164,7 +183,7 @@ class Controller:
 
       # draw the objects here
       for b in self.engine.bodies:
-        Polygon(b).draw(self.screen)
+        draw_polygon(b, self.screen)
         draw_arrow(b.center_of_mass, b.center_of_mass + b.linear_velocity, self.screen)
 
       for cd in last_frame_collusions:
@@ -179,6 +198,11 @@ class Controller:
     self.running = True
     
     while self.running:
+      
+      mouse_events: list[MouseEvent] = []
+      mouse_pos_frame = Vector2(pygame.mouse.get_pos())
+      mouse_events.append(MouseEvent(mouse_pos_frame, 'hover'))
+
       screen_click = False
       for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -186,11 +210,14 @@ class Controller:
           break
         
         if event.type == pygame.MOUSEBUTTONDOWN:
+          mouse_events.append(MouseEvent(mouse_pos_frame, 'mousedown'))
           self.mouse_down = True
         
         if event.type == pygame.MOUSEBUTTONUP:
+          mouse_events.append(MouseEvent(mouse_pos_frame, 'mouseup'))
+          if self.mouse_down:
+            screen_click = True
           self.mouse_down = False
-          screen_click = True
         
         if event.type == pygame.KEYDOWN:
           # clear 
@@ -205,37 +232,38 @@ class Controller:
             self.mode = 2
           elif event.key == pygame.K_3:
             pass
-
+      
       if screen_click:
-        middle = screen_to_world(Vector2(pygame.mouse.get_pos()))[0]
-        d = 50
-        points = [
-            Vector2(-d,  -d) + middle,
-            Vector2(d,  -d) +middle,
-            Vector2(0, d) + middle,
-            # Vector2(-d, d) +middle,
-        ]
-        self.engine.add_polygonal_body(points)
+        mouse_events.append(MouseEvent(mouse_pos_frame, 'click'))
+        
+
+      
+      # say we have a click / hover event
+      # - first, make the UI consume the click / hover / mousedown / mouseup
+      # - then, if still there, pass on to the engine
+      
+      # engine preupdate
+      # - tell the engine all the events that have occured
+      # - so, clicks transformed into world coordinates
+      # - also any unconsumed hover, make the color change or something
+      self.engine.preupdate([MouseEvent(screen_to_world(e.position), e.type) for e in mouse_events])
       
       self.screen.fill('white')
-      # draw the objects here
+      # draw engine items
       for b in self.engine.bodies:
-        Polygon(b).draw(self.screen)
+        draw_polygon(b, self.screen)
         draw_arrow(b.center_of_mass, b.center_of_mass + b.linear_velocity, self.screen)
       
-      # draw the UI here
-      l1 = label('1: add square', 'Arial', 36, self.mode == 1)
-      self.screen.blit(l1, (10, 10))
-      left = l1.get_rect().bottomright[0]
-      
-      l2 = label('2: drag', 'Arial', 36, self.mode == 2)
-      self.screen.blit(l2, (left + 20, 10))
       
       self.engine.update(1 / 60)
+      
       pygame.display.flip()
       self.clock.tick(60)
+
     pygame.quit()
 
 if __name__ == '__main__':
-  c = Controller()
-  c.play()
+  # c = Controller()
+  # c.play()
+  l = UILayer()
+  l.play()

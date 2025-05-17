@@ -98,16 +98,12 @@ class Polygon(RigidBody):
     # all bodies this body touches also might be stationary (confirmed not moving)
     if self.might_be_resting and len([b for b in self.touching if (not b.might_be_resting)]) == 0:
       self.current_run = min(self.current_run + 1, RESTING_CONTACT_THRES)
-      print(self.current_run)
     else:
       self.resting = False
       self.current_run = 0
       self.begin_pos = Vector2(self.center_of_mass)
 
     if self.current_run >= RESTING_CONTACT_THRES:
-      print('start resting')
-      print(self.center_of_mass, self.begin_pos)
-      print()
       self.current_run = 0
       self.resting = True
       self.linear_velocity = Vector2(0, 0)

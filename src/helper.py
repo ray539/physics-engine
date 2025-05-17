@@ -11,10 +11,10 @@ def world_to_screen(coord: T) -> T:
     return list(map(lambda p : Vector2(p.x, SCREEN_HEIGHT - p.y), coord))
   return Vector2(coord.x, SCREEN_HEIGHT - coord.y)
 
-def screen_to_world(coord: Vector2 | list[Vector2]):
+def screen_to_world(coord: T) -> T:
   if isinstance(coord, list):
     return list(map(lambda p : Vector2(p.x, SCREEN_HEIGHT - p.y), coord))
-  return [Vector2(coord.x, SCREEN_HEIGHT - coord.y)]
+  return Vector2(coord.x, SCREEN_HEIGHT - coord.y)
 
 def area_of_polygon(points: list[Vector2]) -> float:
   """

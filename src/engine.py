@@ -8,6 +8,8 @@ from pygame import Surface
 import pygame
 import pickle
 
+from input import MouseEvent
+
 class Engine:
   def __init__(self):
     self.bodies: list[Polygon] = []
@@ -95,7 +97,26 @@ class Engine:
           resolve_velocity(col, dt)
           resolve_penetration(col) 
   
+  def preupdate(self, mouse_events: list[MouseEvent]):
+    for e in mouse_events:
+      if e.type == 'click':
+        d = 50
+        points: list[Vector2] = [
+            Vector2(-d,  -d) + e.position,
+            Vector2(d,  -d) + e.position,
+            Vector2(0, d) + e.position,
+        ]
+        self.add_polygonal_body(points)
+        
+            
+    
+  
   def update(self, dt: float):
+    
+    # handle clicks here?
+    
+    
+    
     # delete all forces
     for b in self.bodies:
       b.linear_acceleration = Vector2(0, 0)
@@ -107,7 +128,7 @@ class Engine:
     # free body update
     for body in self.bodies:
       body.update_unconstrained(dt)
-    
+      
     # resolve collusions
     self.resolve_collusions_advanced(10, dt)
 
