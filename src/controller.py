@@ -13,32 +13,6 @@ from copy import deepcopy
 from input import MouseEvent
 from ui import UILayer, label
 
-# class Polygon:
-#   def __init__(self, engine_polygon: Polygon) -> None:
-#     """
-#       wrapper around engine polygon, including methods to draw
-#       points: global (word) coordinates
-#     """
-#     self.engine_polygon = engine_polygon
-#     if self.engine_polygon.mass > 0:
-#       # if self.engine_polygon.resting:
-#       #   self.fill_color = (0, 255, 0)
-#       # else:
-#       self.fill_color = (255, 0, 0)
-#     else:
-#       self.fill_color = (0, 0, 255)
-
-#     self.border_color = tuple([200 if c == 0 else c for c in self.fill_color])
-
-#   def draw(self, surface: Surface):
-#     screen_points = world_to_screen(self.engine_polygon.get_points_global())
-#     mid = avg(screen_points)
-#     thickness = 2
-#     pygame.draw.polygon(surface, self.fill_color, screen_points)
-#     lab = label(str(self.engine_polygon.body_id), 'Arial', 10)
-#     rect = pygame.Rect((0, 0), (lab.get_width(), lab.get_height()))
-#     rect.center = (int(mid.x), int(mid.y))
-#     surface.blit(lab, rect)
 
 def draw_polygon(polygon: Polygon, surface: Surface):
   if polygon.mass > 0:
@@ -199,9 +173,9 @@ class Controller:
     
     while self.running:
       
-      mouse_events: list[MouseEvent] = []
       mouse_pos_frame = Vector2(pygame.mouse.get_pos())
-      mouse_events.append(MouseEvent(mouse_pos_frame, 'hover'))
+      mouse_event: MouseEvent = MouseEvent(mouse_pos_frame, set())
+      mouse_event.types.add('hover')
 
       screen_click = False
       for event in pygame.event.get():
@@ -210,11 +184,11 @@ class Controller:
           break
         
         if event.type == pygame.MOUSEBUTTONDOWN:
-          mouse_events.append(MouseEvent(mouse_pos_frame, 'mousedown'))
+          mouse_event.types.add('mousedown')
           self.mouse_down = True
         
         if event.type == pygame.MOUSEBUTTONUP:
-          mouse_events.append(MouseEvent(mouse_pos_frame, 'mouseup'))
+          mouse_event.types.add('mouseup')
           if self.mouse_down:
             screen_click = True
           self.mouse_down = False
@@ -234,7 +208,7 @@ class Controller:
             pass
       
       if screen_click:
-        mouse_events.append(MouseEvent(mouse_pos_frame, 'click'))
+        mouse_event.types.add('click')
         
 
       
@@ -246,7 +220,7 @@ class Controller:
       # - tell the engine all the events that have occured
       # - so, clicks transformed into world coordinates
       # - also any unconsumed hover, make the color change or something
-      self.engine.preupdate([MouseEvent(screen_to_world(e.position), e.type) for e in mouse_events])
+      self.engine.preupdate(mouse_event)
       
       self.screen.fill('white')
       # draw engine items

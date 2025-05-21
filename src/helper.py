@@ -1,7 +1,9 @@
-from typing import TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 from pygame.math import Vector2
 
 from constants import EPS, SCREEN_HEIGHT
+
 
 
 
@@ -130,3 +132,15 @@ def get_square(bottom_left: Vector2, size: int):
         bottom_left + Vector2(size, size),
         bottom_left + Vector2(0, size)
   ]
+
+def to_tuple(v: Vector2):
+  return (int(v.x), int(v.y))
+
+# T2 = TypeVar('T2', bound=UINode)
+# def convert(func: Callable[[MouseEvent, UINode], Any] | None, default: Callable[[MouseEvent], Any]):
+#   def res(mouse_event: MouseEvent):
+#     if func:
+#       func(mouse_event, self)
+#     else:
+#       default(mouse_event)
+#   return res

@@ -97,14 +97,15 @@ class Engine:
           resolve_velocity(col, dt)
           resolve_penetration(col) 
   
-  def preupdate(self, mouse_events: list[MouseEvent]):
-    for e in mouse_events:
-      if e.type == 'click':
+  def preupdate(self, mouse_event: MouseEvent):
+    for type in mouse_event.types:
+      pos = screen_to_world(mouse_event.position)
+      if type == 'click':
         d = 50
         points: list[Vector2] = [
-            Vector2(-d,  -d) + e.position,
-            Vector2(d,  -d) + e.position,
-            Vector2(0, d) + e.position,
+            Vector2(-d,  -d) + pos,
+            Vector2(d,  -d) + pos,
+            Vector2(0, d) +pos,
         ]
         self.add_polygonal_body(points)
         

@@ -1,11 +1,159 @@
+from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Generic, Literal, TypeVar, cast
 import pygame
 from pygame.math import Vector2
 from pygame.surface import Surface
 from constants import SCREEN_HEIGHT, SCREEN_WIDTH
 from abc import ABC, abstractmethod
+from collections.abc import Callable
+from helper import to_tuple
+from input import MouseEvent
 
+@dataclass
+class Drawable:
+  to_draw: Surface
+  dest_top_left: Vector2
+  offset: Vector2
+  
+T = TypeVar('T')
+class Controlled(Generic[T]):
+  """
+    wrapper to make value mutable\n
+    free: whether the UINode can also set this value freely
+  """
+  def __init__(self, val:  T | 'Controlled[T]' | Callable[[], T], free:bool = False) -> None:
+    super().__init__()
+    self.free: bool = free
+    self.val: T | Callable[[], T]
+    
+    if isinstance(val, Controlled):
+      # copy 'other'
+      other = cast(Controlled[T], val)
+      self.val = other.val
+      self.free = other.free
+      
+    elif isinstance(val, Callable):
+      # val = cast(Callable[[], T], val)
+      self.val = val
+    else:
+      self.val = val
+
+  def set(self, val: T):
+    """
+      set value of this mutable.
+    """
+    self.val = val
+    
+  def set_if_free(self, val: T):
+    """
+      set value if this value is free
+    """
+    
+    if self.free:
+      self.val = val
+  
+  def get(self) -> T:
+    if isinstance(self.val, Callable):
+      return self.val() # type: ignore
+    return self.val
+
+
+"""
+  Controlled[T] | () -> T \n
+  use extract() to get the value
+"""
+
+Param = T | Controlled[T] | Callable[[], T]
+"""
+  Controlled[T] | () -> T. \n
+  Use parse_param() to turn it into a controllable for UINode use.
+"""
+
+def parse_param(val: Param[T]) -> Controlled[T]:
+  """
+    given val: T | Controlled[T] | () -> T \n
+    turn it into 'Controlled' type which is locked <-> the given controlled type is locked
+  """
+  if isinstance(val, Callable):
+    val = cast(Callable[[], T], val)
+    return Controlled(val)
+  return Controlled(val)
+
+def lighten(color: tuple[int, int, int, int], amount: int):
+  new_color = [min(a + amount, 255) for a in color]
+  new_color[3] = 255
+  return tuple(new_color)
+
+# def extract(val: Extractable[T]) -> T:
+#   if isinstance(val, Controlled):
+#     return cast(T, val.get())
+#   return val()
+
+# def set_if_controlled(val: Extractable[T], new_val: T):
+#   if isinstance(val, Controlled):
+#     val = cast(Controlled[T], val)
+#     val.set(new_val)
+
+T2 = TypeVar('T2', bound='UINode')
+def convert(func: Callable[[MouseEvent, T2], Any] | None, default: Callable[[MouseEvent], Any], self: T2):
+  def res(mouse_event: MouseEvent):
+    if func:
+      func(mouse_event, self)
+    else:
+      default(mouse_event)
+  return res
+
+class HitBox:
+  def __init__(
+      self, 
+      rect: pygame.Rect,
+      on_mouseenter: Callable[[MouseEvent], Any] = lambda e: None,
+      on_mouseleave: Callable[[MouseEvent], Any] = lambda e: None,
+      on_mousepress: Callable[[MouseEvent], Any] = lambda e: None,
+      on_mouserelease: Callable[[MouseEvent], Any] = lambda e: None,
+      on_click: Callable[[MouseEvent], Any] = lambda e: None,
+    ) -> None:
+    self.rect = rect
+    self.mouse_over: bool = False
+    self.pressed = False
+    
+    self.on_mouseenter = on_mouseenter
+    self.on_mouseleave = on_mouseleave
+    self.on_mousepress = on_mousepress
+    self.on_mouserelease = on_mouserelease
+    self.on_click = on_click
+
+  def update_mouse_over(self, mouse_event: MouseEvent, new_mouseover: bool):
+    """
+      update mouse_event
+    """
+    if new_mouseover:
+      if not self.mouse_over:
+        # mouse wasn't over in prev frame
+        self.on_mouseenter(mouse_event)
+      elif 'mousedown' in mouse_event.types:
+        self.pressed = True
+        self.on_mousepress(mouse_event)
+      elif 'mouseup' in mouse_event.types:
+        if self.pressed:
+          self.on_mouserelease(mouse_event)
+          self.on_click(mouse_event)
+        self.pressed = False
+    else:
+      if self.mouse_over:
+        self.on_mouseleave(mouse_event)
+        self.pressed = False
+    
+    self.mouse_over = new_mouseover
+
+def label(text: str, font_name: str, font_size: int, highlight: bool = False):
+  font = pygame.font.SysFont(font_name, font_size)
+  a1 = font.render(text, True, (0, 0, 0))
+  b1 = pygame.Surface((a1.get_width() + 10, a1.get_height() + 10))
+  b1.fill((0, 200, 0) if highlight else (200, 200, 200))
+  b1.blit(a1, (5, 5))
+  return b1
 
 class MyRect:
   top_left: Vector2
@@ -15,35 +163,62 @@ class MyRect:
     self.bottom_right = bottom_right
 
 class UINode(ABC):
-  def __init__(self, 
-               children: list['UINode'],
-               padding:int = 0,
-               min_width: int = 0, 
-               min_height: int = 0, 
-               background_color: tuple[int, int, int, int] = (0, 0, 0, 0)):
-    self.children = children
-    self.padding = padding
-    self.min_width = min_width
-    self.min_height = min_height
-    self.background_color = background_color
+  def __init__(self,
+               children: Param[list['UINode']],
+               padding: Param[int] = Controlled(0, True),
+               min_width: Param[int] = Controlled(0, True), 
+               min_height: Param[int] = Controlled(0, True),
+               background_color: Param[tuple[int,int,int,int]] = Controlled((200, 200, 200, 255), True)):
+
+    self.children = parse_param(children)
+    self.padding = parse_param(padding)
+    self.min_width = parse_param(min_width)
+    self.min_height = parse_param(min_height)
+    self.background_color = parse_param(background_color)
+    
+    # to be filled in
+    self.is_wh_calculated = False
+    self.width_height: tuple[int, int] = (-1, -1)
+    
+    self.is_gr_calculated = False
+    self.global_rect: pygame.Rect = pygame.Rect((-1, -1), (-1, -1))
   
   @abstractmethod
-  def get_surface(self) -> tuple[Surface, Vector2]:
+  def calc_width_height(self) -> tuple[int, int]:
     """
-      get real surface, as well coordinates of canvas_top_left in canvas coordinates
+      set self.width_height to appropiate values for parent use\n
+      return (width, height)
+    """
+    
+  @abstractmethod
+  def get_drawable(self, top_left: Vector2) -> Drawable:
+    """
+      calculate hitboxes for node and children \n
+      and return drawable
+    """
+    pass
+  
+  @abstractmethod
+  def get_best_hitbox(self, mouse_event: MouseEvent) -> HitBox | None:
+    """
+      given a mouse event, get best hitbox from this node and it's children
+    """
+  
+  @abstractmethod
+  def get_all_hitboxes(self) -> list[HitBox]:
+    """
+      get all hitboxes from tree rooted at this node
     """
 
-  @abstractmethod
-  def get_width(self) -> int:
-    """
-      get logical width for parent use
-    """
-  
-  @abstractmethod
-  def get_height(self) -> int:
-    """
-      get logical height for parent use
-    """
+# Controlled[]
+# a = Controlled(1)
+# a.set(2)
+# a.set(3)
+# a.set(4)
+# ...
+# and, we will
+
+
 
 class InfiniteSurface:
   """
@@ -53,18 +228,13 @@ class InfiniteSurface:
   def __init__(self) -> None:
     self.objects: list[tuple[Surface, Vector2]] = [] # (UINode, top_left) pairs
   
-  def blit(self, node: UINode | Surface, top_left: Vector2):
+  def blit(self, surface: Surface, top_left: Vector2):
     """
       blit logical UINode top left
     """
-    if isinstance(node, UINode):
-      # want (0, 0) in canvas coords to -> top_left
-      surf, canv_top_left = node.get_surface()
-      self.objects.append((surf, canv_top_left + top_left))
-    else:
-      self.objects.append((node, top_left))
+    self.objects.append((surface, top_left))
 
-  def get_rects(self):
+  def get_child_rects(self):
     """
       maps all child objects into rect objects
     """
@@ -80,7 +250,7 @@ class InfiniteSurface:
     """
       return real surface, and coordinates of canvas top left in canvas coordinates
     """
-    rects = self.get_rects()
+    rects = self.get_child_rects()
     min_x = min([rect.top_left.x for rect in rects])
     min_y = min([rect.top_left.y for rect in rects])
     max_x = max([rect.bottom_right.x for rect in rects])
@@ -93,172 +263,355 @@ class InfiniteSurface:
     
     for o in self.objects:
       surf.blit(o[0], o[1] + vec)
-    pygame.draw.rect(surf, (255, 0, 0), pygame.Rect(0, 0, actual_width, actual_height), 1)
+    # pygame.draw.rect(surf, (255, 0, 0), pygame.Rect(0, 0, actual_width, actual_height), 1) # for debuggging, red line
     return (surf, -vec)
-
-def label(text: str, font_name: str, font_size: int, highlight: bool = False):
-  font = pygame.font.SysFont(font_name, font_size)
-  a1 = font.render(text, True, (0, 0, 0))
-  b1 = pygame.Surface((a1.get_width() + 10, a1.get_height() + 10))
-  b1.fill((0, 200, 0) if highlight else (200, 200, 200))
-  b1.blit(a1, (5, 5))
-  return b1
 
 class ButtonWith(UINode):
   def __init__(self, 
-               text: str,
-               font_size: int,
                dropdown_content: UINode | None,
-               font_color: tuple[int, int, int] = (0, 0, 0),
                
-               font_name: str = 'Arial',
+               text: Param[str] = Controlled('', True),
+               font_size: Param[int] = Controlled(20, True),
+               font_name: Param[str] = Controlled('Arial', True),
+               
+               show_dropdown: Param[bool] = Controlled(False, True),
+               
+               font_color: Param[tuple[int, int, int]] = Controlled((0, 0, 0), True),
+               gap: Param[int] = Controlled(20, True),
+               on_mouseenter: Callable[[MouseEvent, 'ButtonWith'], Any] | None = None,
+               on_mouseleave: Callable[[MouseEvent, 'ButtonWith'], Any] | None = None,
+               on_mousepress: Callable[[MouseEvent, 'ButtonWith'], Any] | None = None,
+               on_mouserelease: Callable[[MouseEvent, 'ButtonWith'], Any] | None = None,
+               on_click: Callable[[MouseEvent, 'ButtonWith'], Any] | None = None,
+               
                padding: int = 5, 
                min_width: int = 0, 
-               min_height: int = 0, 
-               background_color: tuple[int, int, int, int] = (200, 200, 200, 255),
+               min_height: int = 0,
+               background_color: Param[tuple[int,int,int,int]] = Controlled((200, 200, 200, 255), True), # controlled / uncontrolled
               ):
     super().__init__([], padding, min_width, min_height, background_color)
-    self.text = text
-    self.font_name = font_name,
-    self.font_size = font_size
-    self.font_color = font_color
+    self.text = parse_param(text)
+    self.font_name = parse_param(font_name)
+    self.font_size = parse_param(font_size)
+    self.font_color = parse_param(font_color)
+    self.gap = parse_param(gap)
     
-    # self.button = self.get_button()
-    self.dropdown_content = dropdown_content
+    self.DROPDOWN_CONTENT = dropdown_content
+    self.show_dropdown = parse_param(show_dropdown)
+    
+    self.background_shade: Literal['normal', 'lighter', 'darker'] = 'normal'
+    def on_mouseenter_default(mouse_event: MouseEvent):
+      # make it a bit lighter
+      self.background_shade = 'lighter'
+
+    def on_mouseleave_default(mouse_event: MouseEvent):
+      self.background_shade = 'normal'
+      # set_if_controlled(self.background_color, extract(self.ORIGINAL_BGC))
+    
+    def on_mousepress_default(mouse_event: MouseEvent):
+      # make it a bit darker
+      self.background_shade = 'darker'
+      
+    def on_mouserelease_default(mouse_event: MouseEvent):
+      self.background_shade = 'normal'
+    
+    def on_click_default(mouse_event: MouseEvent):
+      self.show_dropdown.set_if_free(not self.show_dropdown.get())
+      if on_click:
+        on_click(mouse_event, self)
+
+    # to be calculated
+    self.button_hitbox: HitBox = HitBox(
+      pygame.Rect((-1, -1), (-1, -1)),
+      on_mouseenter=convert(on_mouseenter, on_mouseenter_default, self),
+      on_mouseleave=convert(on_mouseleave, on_mouseleave_default, self),
+      on_mousepress=convert(on_mousepress, on_mousepress_default, self),
+      on_mouserelease=convert(on_mouserelease, on_mouserelease_default, self),
+      on_click=on_click_default
+    )
 
   def get_button(self) -> Surface:
-    font = pygame.font.SysFont(self.font_name, self.font_size)
-    text_surface = font.render(self.text, True, self.font_color)
-    width, height = text_surface.get_width() + 2 * self.padding, text_surface.get_height() + 2 * self.padding
-    this_surface = Surface((width, height))
-    this_surface.fill(self.background_color)
-    this_surface.blit(text_surface, (self.padding, self.padding))
+    if self.background_shade == 'normal':
+      background_color = self.background_color.get()
+    elif self.background_shade == 'darker':
+      background_color = lighten(self.background_color.get(), -20)
+    else:
+      background_color = lighten(self.background_color.get(), 20)      
     
+    font = pygame.font.SysFont(self.font_name.get(), self.font_size.get())
+    text_surface = font.render(self.text.get(), True, self.font_color.get())
+    width, height = text_surface.get_width() + 2 * self.padding.get(), text_surface.get_height() + 2 * self.padding.get()
+    this_surface = Surface((width, height))
+    this_surface.fill(background_color)
+    this_surface.blit(text_surface, (self.padding.get(), self.padding.get()))
     # draw border. Always black for now, customize later
     pygame.draw.rect(this_surface, (0, 0, 0), pygame.Rect((0, 0), (width, height)), 2)
     return this_surface
-
-  def get_surface(self) -> tuple[Surface, Vector2]:
+  
+  def calc_width_height(self):
     button = self.get_button()
+    width, height = button.get_width(), button.get_height()
+    
+    dropdown_content = self.DROPDOWN_CONTENT if self.show_dropdown.get() else None
+    if dropdown_content:
+      dropdown_content.calc_width_height()
+    
+    self.width_height = (width, height)
+    self.is_wh_calculated = True
+    return (width, height)
+  
+  def get_best_hitbox(self, mouse_event: MouseEvent):
+    # try to get from dropdown content first
+    dropdown_content = self.DROPDOWN_CONTENT if self.show_dropdown.get() else None
+    if dropdown_content:
+      tmp = dropdown_content.get_best_hitbox(mouse_event)
+      if tmp:
+        return tmp
+
+    # get it from myself
+    if self.button_hitbox.rect.collidepoint(mouse_event.position):
+      return self.button_hitbox
+    return None
+  
+  def get_all_hitboxes(self):
+    # get all hitboxes from myself and children
+    ans = [self.button_hitbox]
+    dropdown_content = self.DROPDOWN_CONTENT if self.show_dropdown.get() else None
+    if dropdown_content:
+      ans.extend(dropdown_content.get_all_hitboxes())
+    return ans
+  
+  def get_drawable(self, top_left: Vector2) -> Drawable:
+    if not self.is_wh_calculated:
+      raise Exception('you must run calculate wh first')    
     inf_surface = InfiniteSurface()
+    button = self.get_button()
     inf_surface.blit(button, Vector2(0, 0))
     
-    if self.dropdown_content:
-      blit_x = button.get_width() - self.dropdown_content.get_width()
-      blit_y = button.get_height() + 20
-      
-      inf_surface.blit(self.dropdown_content, Vector2(blit_x, blit_y))
-    return inf_surface.get_real_surface()
+    button_rect = button.get_rect()
+    button_rect.topleft = to_tuple(top_left)
+    self.button_hitbox.rect = button_rect
+
+    dropdown_content = self.DROPDOWN_CONTENT if self.show_dropdown.get() else None    
+    if dropdown_content:
+      blit_x = button.get_width() - dropdown_content.width_height[0]
+      blit_y = button.get_height() + self.gap.get()
+      ret = dropdown_content.get_drawable(Vector2(blit_x, blit_y) + top_left)
+      inf_surface.blit(ret.to_draw, Vector2(blit_x, blit_y))
+    
+    surf, offset = inf_surface.get_real_surface()
+    self.global_rect = surf.get_rect()
+    self.global_rect.topleft = to_tuple(top_left + offset)
+    self.is_gr_calculated = True
+    return Drawable(surf, top_left, offset)
+
+class MySurface(UINode):
+  def __init__(self,    
+               surface: pygame.Surface,
+               
+               show_outline: Param[bool] = Controlled(False, True),
+               on_click: Callable[[MouseEvent, 'MySurface'], Any] | None = None,
+               children: list[UINode] = [],
+               padding: int = 0, 
+               min_width: int = 0, 
+               min_height: int = 0, 
+               background_color: Param[tuple[int, int, int, int]] = (0, 0, 0, 0)
+  ):
+    super().__init__(children, padding, min_width, min_height, background_color)
+    
+    self.ORIGINAL_SURF = surface
+    self.OUTLINED_SURF = surface.copy()
+    
+    self.show_outline = parse_param(show_outline)
+    
+    pygame.draw.rect(self.OUTLINED_SURF, (0, 255, 0, 255), pygame.Rect((0, 0), (self.OUTLINED_SURF.get_width(), self.OUTLINED_SURF.get_height())), 2)
+    self.hit_box = HitBox(
+      pygame.Rect((-1, -1), (-1, -1)),
+      on_click=convert(on_click, lambda e: None, self)
+    )
   
-  def get_width(self) -> int:
-    button = self.get_button()
-    return button.get_width()
-  
-  def get_height(self) -> int:
-    button = self.get_button()
-    return button.get_height()
+  def calc_width_height(self) -> tuple[int, int]:
+    surface = self.OUTLINED_SURF if self.show_outline.get() else self.ORIGINAL_SURF
+    w,h = surface.get_width(), surface.get_height()
+    self.width_height = (w, h)
+    return (w, h)
+
+  def get_drawable(self, top_left: Vector2) -> Drawable:
+    surface = self.OUTLINED_SURF if self.show_outline.get() else self.ORIGINAL_SURF
+    self.hit_box.rect = pygame.Rect(top_left, (surface.get_width(), surface.get_height()))
+    return Drawable(surface, top_left, Vector2(0, 0))
+
+  def get_best_hitbox(self, mouse_event: MouseEvent) -> HitBox | None:
+    if self.hit_box.rect.collidepoint(mouse_event.position):
+      return self.hit_box
+    return None
+
+  def get_all_hitboxes(self) -> list[HitBox]:
+    return [self.hit_box]
 
 ChildAlignmentType = Literal['left', 'right', 'space_between']
 class Container(UINode):
-  def __init__(self, 
+  def __init__(self,
                child_alignment: ChildAlignmentType = 'left',
                child_spacing: int = 10,
                direction: Literal['row', 'col'] = 'row',
-               
                children: list[UINode] = [],
-               padding:int = 10, 
+               padding: int = 10, 
                min_width: int = 0, 
                min_height: int = 0, 
-               background_color: tuple[int, int, int, int] = (200, 200, 200, 255), 
+               background_color: Param[tuple[int,int,int,int]] = (200, 200, 200, 255), 
               ):
     super().__init__(children, padding, min_width, min_height, background_color)
+    
     self.child_alignment: Literal['left', 'right', 'space_between'] = child_alignment
     self.child_spacing = child_spacing
     self.direction = direction
-
-  def get_surface(self):
-    # so, we need to get the width / height of all the children
-    num_children = len(self.children)
-    # need to get these before hand, else don't know how to space out the nodes
-    this_width = self.get_width()
-    this_height = self.get_height()
-
-    inf_surface = InfiniteSurface()
-    background = Surface((this_width, this_height), pygame.SRCALPHA)
-    background.fill(self.background_color)
     
-    # draw background border
-    pygame.draw.rect(background, (0, 0, 0), pygame.Rect((0, 0), (this_width, this_height)), 2)
+    self.container_hitbox = HitBox(
+      pygame.Rect((-1, -1), (-1, -1)),
+    )
+  
+  def process_mouse_event_self(self, mouse_event: MouseEvent) -> bool:
+    return False
+  
+  def calc_width_height(self):
+    child_width_heights = [c.calc_width_height() for c in self.children.get()]
+    num_children = len(self.children.get())
+    main_dir = 0 if self.direction == 'row' else 1
+    width_height = [0, 0]
+    
+    width_height[main_dir] = sum([c[main_dir] for c in child_width_heights]) + self.child_spacing * max(num_children - 1, 0) + 2 * self.padding.get()
+    width_height[1 - main_dir] = max([c[1 - main_dir] for c in child_width_heights]) + 2 * self.padding.get()
+    width_height[0] = max(width_height[0], self.min_width.get())
+    width_height[1] = max(width_height[1], self.min_height.get())
+    self.width_height = cast(tuple[int, int], tuple(width_height))
+    
+    self.is_wh_calculated = True
+    return self.width_height
+  
+  def get_drawable(self, top_left: Vector2) -> Drawable:
+    if not self.is_wh_calculated:
+      raise Exception('you must run calculate_with_height first')
+
+    main_dir = 0 if self.direction == 'row' else 1
+    dirs = [Vector2(1, 0), Vector2(0, 1)]
+    delta = [Vector2(-1, 1), Vector2(1, -1)]
+    
+    num_children = len(self.children.get())
+    # need to get these before hand, else don't know how to space out the nodes
+    background = Surface(self.width_height, pygame.SRCALPHA)
+    background.fill(self.background_color.get())
+    pygame.draw.rect(background, (0, 0, 0), pygame.Rect((0, 0), self.width_height), 2)
+    
+    inf_surface = InfiniteSurface()
     inf_surface.blit(background, Vector2(0, 0))
     
-    if self.direction == 'row':
-      if self.child_alignment == 'left':
-        cur_top_left = Vector2(self.padding, self.padding)
-        for child in self.children:
-          inf_surface.blit(child, cur_top_left)
-          cur_top_left += Vector2(child.get_width() + self.child_spacing, 0)
-      
-      elif self.child_alignment == 'right':
-        cur_top_right = Vector2(this_width - self.padding, self.padding)
-        for child in reversed(self.children):
-          cur_top_left = cur_top_right - Vector2(child.get_width(), 0)
-          inf_surface.blit(child, cur_top_left)
-          cur_top_right += Vector2(-child.get_width() - self.child_spacing, 0)
-          
-      elif self.child_alignment == 'space_between':
-        pure_width = sum([c.get_width() for c in self.children]) + self.child_spacing * (num_children - 1)
-        space_left = this_width - pure_width
-        cur_top_left = Vector2(space_left / 2, self.padding)
-        for child in self.children:
-          inf_surface.blit(child, cur_top_left)
-          cur_top_left += Vector2(child.get_width() + self.child_spacing, 0)
-
-    else:
-      if self.child_alignment == 'left':
-        cur_top_left = Vector2(self.padding, self.padding)
-        for child in self.children:
-          inf_surface.blit(child, cur_top_left)
-          cur_top_left += Vector2(0, child.get_height() + self.child_spacing)
-      
-      elif self.child_alignment == 'right':
-        cur_bottom_left = Vector2(self.padding, this_height - self.padding)
-        for child in reversed(self.children):
-          cur_top_left = cur_bottom_left - Vector2(0, child.get_height())
-          inf_surface.blit(child, cur_top_left)
-          cur_bottom_left += Vector2(0, -child.get_height() - self.child_spacing)
-          
-      elif self.child_alignment == 'space_between':
-        pure_height = sum([c.get_height() for c in self.children]) + self.child_spacing * (num_children - 1)
-        space_left = this_height - pure_height
-        cur_top_left = Vector2(self.padding, space_left / 2)
-        
-        for child in self.children:
-          inf_surface.blit(child, cur_top_left)
-          cur_top_left += Vector2(0, child.get_height() + self.child_spacing)
-    # now, get the actual surface
-    return inf_surface.get_real_surface()
-
-  def get_width(self) -> int:
-    if self.direction == 'row':
-      this_width = sum([c.get_width() for c in self.children]) + self.child_spacing * (len(self.children) - 1) + 2 * self.padding
-    else:
-      this_width = max([c.get_width() for c in self.children]) + 2 * self.padding
-
-    this_width = max(this_width, self.min_width)
-    return this_width
-  
-  def get_height(self) -> int:
-    if self.direction == 'row':
-      this_height = max([c.get_height() for c in self.children]) + 2 * self.padding
-    else:
-      this_height = sum([c.get_height() for c in self.children]) + self.child_spacing * (len(self.children) - 1) + 2 * self.padding
+    if self.child_alignment == 'left':
+      cur_top_left = Vector2(self.padding.get(), self.padding.get())
+      for child in self.children.get():
+        ret = child.get_drawable(cur_top_left + top_left)
+        inf_surface.blit(ret.to_draw, cur_top_left + ret.offset)
+        cur_top_left += dirs[main_dir] * (child.width_height[main_dir] + self.child_spacing)   
     
-    this_height = max(this_height, self.min_height)
-    return this_height
+    elif self.child_alignment == 'right':
+      cur_pt = self.width_height[main_dir] * dirs[main_dir] + delta[main_dir] * self.padding.get()
+      
+      for child in reversed(self.children.get()):
+        cur_top_left = cur_pt - dirs[main_dir] * child.width_height[main_dir]
+        ret = child.get_drawable(cur_top_left + top_left)
+        inf_surface.blit(ret.to_draw, cur_top_left + ret.offset)
+        cur_pt -= dirs[main_dir] * (child.width_height[main_dir] + self.child_spacing)
+        
+    elif self.child_alignment == 'space_between':
+      pure_length = sum([c.width_height[main_dir] for c in self.children.get()]) + self.child_spacing * (num_children - 1)
+
+      space_left = self.width_height[main_dir] - pure_length
+      cur_top_left = Vector2(self.padding.get(), self.padding.get()) + dirs[main_dir] * (space_left / 2)
+      
+      for child in self.children.get():
+        ret = child.get_drawable(cur_top_left + top_left)
+        inf_surface.blit(ret.to_draw, cur_top_left + ret.offset)
+        cur_top_left += child.width_height[main_dir] * dirs[main_dir]
+    
+    this_to_draw, this_offset = inf_surface.get_real_surface()
+    self.global_rect = this_to_draw.get_rect()
+    self.global_rect.topleft = to_tuple(top_left + this_offset)
+    self.is_gr_calculated = True
+    
+    self.container_hitbox.rect = pygame.Rect(to_tuple(top_left), self.width_height)
+    
+    return Drawable(this_to_draw, top_left, this_offset)
   
-  def get_top_left(self, top_right: Vector2) -> Vector2:
-    this_width = self.get_width()
-    return Vector2(top_right.x - this_width, top_right.y)
+  def get_all_hitboxes(self) -> list[HitBox]:
+    ans = [self.container_hitbox]
+    for c in self.children.get():
+      ans.extend(c.get_all_hitboxes())
+    return ans
+  
+  def get_best_hitbox(self, mouse_event: MouseEvent) -> HitBox | None:
+    for c in self.children.get():
+      tmp = c.get_best_hitbox(mouse_event)
+      if tmp:
+        return tmp
+    if self.container_hitbox.rect.collidepoint(mouse_event.position):
+      return self.container_hitbox
+      
+    return None
+
+class PositionedUINode:
+  def __init__(self, node: UINode, dest_top_left: Vector2 | Callable[[UINode], Vector2]) -> None:
+    self.node = node
+    self.node.calc_width_height()
+    if isinstance(dest_top_left, Callable):
+      dest_top_left = dest_top_left(node)
+    self.dest_top_left = dest_top_left
+  
+  def draw_node(self, dest_surface: Surface):
+    self.node.calc_width_height()
+    drawable = self.node.get_drawable(self.dest_top_left)
+    dest_surface.blit(drawable.to_draw, drawable.dest_top_left + drawable.offset)
+  
+# process clicks
+# pressed
+# - mouse hovering, mouse_down
+# 
+# mouse_enter:
+# - not prev_mouse_over
+# - yes current_mouse_over
+
+# if pressed, 
+# - mouse leave -> pressed = false
+
+# node = get_mouse_hovering(mouse_pos)
+#   set mouse_hovering for rest of the nodes
+
+MouseEventTypes = Literal['mouseenter', 'mouseleave', 'press', 'click']
+
+
+def init_node(node: UINode, dest_top_left: Vector2 | Callable[[UINode], Vector2]):
+  """
+    dest_top_left: top_left to blit node, or a function which returns one\n
+    calculate metadata about the UINode, and return a drawable
+  """
+  node.calc_width_height()
+  if isinstance(dest_top_left, Callable):
+    dest_top_left = dest_top_left(node)
+  return node.get_drawable(dest_top_left)
+
+def circle_graphic(side_length: int):
+  circle = Surface((side_length, side_length), pygame.SRCALPHA)
+  pygame.draw.circle(circle, (255, 0, 0), (side_length / 2, side_length / 2), side_length / 2)
+  return circle
+  
+def triangle_graphic(side_length: int):
+  triag = Surface((side_length, side_length), pygame.SRCALPHA)
+  pygame.draw.polygon(triag, (255, 0, 0), [(0, side_length), (side_length, side_length), (side_length / 2, 0)])
+  return triag
+  
+def square_graphic(side_length: int):
+  square = Surface((side_length, side_length))
+  square.fill((255, 0, 0))
+  return square
 
 class UILayer:
   """
@@ -270,7 +623,6 @@ class UILayer:
   def draw(self, surface: Surface):
     pass
   
-  
   # for debugging, draw only UI layer
   def play(self):
     pygame.init()
@@ -278,44 +630,70 @@ class UILayer:
     self.clock = pygame.time.Clock()
     self.running = True
     
-    load_save = Container(
-      children=[
-        ButtonWith(text='load', font_size=20, dropdown_content=None),
-        ButtonWith(text='save', font_size=20, dropdown_content=None),
-      ],
-      background_color=(230, 230, 230, 255)
-    )
-    
-    dropdown_content = Container(
-      direction='col',
-      children=[
-        ButtonWith(text='movable items', font_size=20, dropdown_content=None),
-        ButtonWith(text='all items', font_size=20, dropdown_content=None),
-      ],
-      background_color=(230, 230, 230, 255),
-      min_height=300
-    )
+    selected_shape = Controlled[Literal['circle', 'square', 'triangle']]('circle')
+    selected_mode = Controlled[Literal['add', 'drag', 'delete']]('add')
     
     options = Container(
       children=[
         ButtonWith(
           text='add',
           font_size=20,
-          dropdown_content=None
+          gap=10,
+          background_color=lambda: (255, 200, 200, 255) if selected_mode.get() == 'add' else (200, 200, 200, 255),
+          on_click=lambda e, n: selected_mode.set('add'),
+          dropdown_content=Container(
+            background_color=Controlled((230, 230, 230, 255)),
+            child_alignment='left',
+            children=[
+              Container(
+                padding=10,
+                background_color=(200, 200, 200, 255),
+                children=[
+                  MySurface(
+                    surface=circle_graphic(50),
+                    show_outline= lambda: selected_shape.get() == 'circle',
+                    on_click= lambda e, n: selected_shape.set('circle')
+                  ),
+                  MySurface(
+                    surface=triangle_graphic(50),
+                    show_outline= lambda : selected_shape.get() == 'triangle',
+                    on_click = lambda e, n: selected_shape.set('triangle')
+                  ),
+                  MySurface(
+                    surface=square_graphic(50),
+                    show_outline=lambda: selected_shape.get() == 'square',
+                    on_click=lambda e, n: selected_shape.set('square')
+                  )
+                ]
+              ),
+              ButtonWith(
+                text='more..',
+                dropdown_content=None,
+                font_size=20
+              )
+            ],
+            padding=10,
+            child_spacing=10
+          ),
         ),
         ButtonWith(
           text='drag',
           font_size=20,
+          background_color=lambda: (255, 200, 200, 255) if selected_mode.get() == 'drag' else (200, 200, 200, 255),
+          on_click=lambda e,n: selected_mode.set('drag'),
           dropdown_content=None
         ),
         ButtonWith(
           text='delete',
           font_size=20,
+          background_color=lambda: (255, 200, 200, 255) if selected_mode.get() == 'delete' else (200, 200, 200, 255),
+          on_click=lambda e,n: selected_mode.set('delete'),
           dropdown_content=None
         ),
         ButtonWith(
           text='clear..', 
           font_size=20, 
+          gap=10,
           dropdown_content=Container(
             direction='col',
             children=[
@@ -323,7 +701,8 @@ class UILayer:
               ButtonWith(text='all items', font_size=20, dropdown_content=None),
             ],
             background_color=(230, 230, 230, 255),
-            min_height=300
+            min_height=300,
+            padding=5
           )
         )
       ],
@@ -332,23 +711,42 @@ class UILayer:
       padding=5
     )
     
-
+    options = PositionedUINode(
+      options,
+      lambda n: Vector2(SCREEN_WIDTH - n.width_height[0] - 20, 20)
+    )
     
-    self.screen.fill((255, 255, 255))
-    
-    for x in range(0, SCREEN_WIDTH, 50):
-      pygame.draw.line(self.screen, (200, 200, 200), Vector2(x, 0), Vector2(x, SCREEN_HEIGHT))
-
-    surf, canvas_top_left = options.get_surface()
-    self.screen.blit(surf, Vector2(300, 20) + canvas_top_left)
-
-
-    pygame.display.flip()
-    
-    while True:
+    self.mouse_down = False
+    while self.running:      
+      mouse_pos_frame = Vector2(pygame.mouse.get_pos())
+      mouse_event: MouseEvent = MouseEvent(mouse_pos_frame, set())
+      mouse_event.types.add('hover')
+      
       for event in pygame.event.get():
         if event.type == pygame.QUIT:
           self.running = False
-          break
+          
+        if event.type == pygame.MOUSEBUTTONDOWN:
+          mouse_event.types.add('mousedown')
+          self.mouse_down = True
+        
+        if event.type == pygame.MOUSEBUTTONUP:
+          mouse_event.types.add('mouseup')
+          self.mouse_down = False
+      
+
+      # process mouse events
+      best = options.node.get_best_hitbox(mouse_event)
+      for h in options.node.get_all_hitboxes():
+        h.update_mouse_over(mouse_event, h == best)
+      
+      
+      # draw nodes
+      self.screen.fill((255, 255, 255))
+      for x in range(0, SCREEN_WIDTH, 50):
+        pygame.draw.line(self.screen, (200, 200, 200), Vector2(x, 0), Vector2(x, SCREEN_HEIGHT))
+
+      options.draw_node(self.screen)
+
+      pygame.display.flip()
       self.clock.tick(60)
-    # pass
