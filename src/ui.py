@@ -4,11 +4,13 @@ from typing import Any, Generic, Literal, TypeVar, cast
 import pygame
 from pygame.math import Vector2
 from pygame.surface import Surface
+from common import Add, Delete, Drag, StateManager, circle_graphic, square_graphic, triangle_graphic
 from constants import SCREEN_HEIGHT, SCREEN_WIDTH
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from helper import to_tuple
 from input import MouseEvent
+pygame.init()
 
 @dataclass
 class Drawable:
@@ -85,16 +87,6 @@ def lighten(color: tuple[int, int, int, int], amount: int):
   new_color[3] = 255
   return tuple(new_color)
 
-# def extract(val: Extractable[T]) -> T:
-#   if isinstance(val, Controlled):
-#     return cast(T, val.get())
-#   return val()
-
-# def set_if_controlled(val: Extractable[T], new_val: T):
-#   if isinstance(val, Controlled):
-#     val = cast(Controlled[T], val)
-#     val.set(new_val)
-
 T2 = TypeVar('T2', bound='UINode')
 def convert(func: Callable[[MouseEvent, T2], Any] | None, default: Callable[[MouseEvent], Any], self: T2):
   def res(mouse_event: MouseEvent):
@@ -151,7 +143,7 @@ def label(text: str, font_name: str, font_size: int, highlight: bool = False):
   font = pygame.font.SysFont(font_name, font_size)
   a1 = font.render(text, True, (0, 0, 0))
   b1 = pygame.Surface((a1.get_width() + 10, a1.get_height() + 10))
-  b1.fill((0, 200, 0) if highlight else (200, 200, 200))
+  b1.fill((0, 200, 0) if highlight else (230, 230, 230))
   b1.blit(a1, (5, 5))
   return b1
 
@@ -525,7 +517,7 @@ class Container(UINode):
     elif self.child_alignment == 'space_between':
       pure_length = sum([c.width_height[main_dir] for c in self.children.get()]) + self.child_spacing * (num_children - 1)
 
-      space_left = self.width_height[main_dir] - pure_length
+      space_left = self.width_height[main_dir] - pure_length - 2*self.padding.get()
       cur_top_left = Vector2(self.padding.get(), self.padding.get()) + dirs[main_dir] * (space_left / 2)
       
       for child in self.children.get():
@@ -598,129 +590,164 @@ def init_node(node: UINode, dest_top_left: Vector2 | Callable[[UINode], Vector2]
     dest_top_left = dest_top_left(node)
   return node.get_drawable(dest_top_left)
 
-def circle_graphic(side_length: int):
-  circle = Surface((side_length, side_length), pygame.SRCALPHA)
-  pygame.draw.circle(circle, (255, 0, 0), (side_length / 2, side_length / 2), side_length / 2)
-  return circle
-  
-def triangle_graphic(side_length: int):
-  triag = Surface((side_length, side_length), pygame.SRCALPHA)
-  pygame.draw.polygon(triag, (255, 0, 0), [(0, side_length), (side_length, side_length), (side_length / 2, 0)])
-  return triag
-  
-def square_graphic(side_length: int):
-  square = Surface((side_length, side_length))
-  square.fill((255, 0, 0))
-  return square
+
 
 class UILayer:
   """
     controller for the UI
   """
-  def __init__(self) -> None:
-    pass
-
-  def draw(self, surface: Surface):
-    pass
-  
-  # for debugging, draw only UI layer
-  def play(self):
-    pygame.init()
-    self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    self.clock = pygame.time.Clock()
-    self.running = True
-    
-    selected_shape = Controlled[Literal['circle', 'square', 'triangle']]('circle')
-    selected_mode = Controlled[Literal['add', 'drag', 'delete']]('add')
+  def __init__(self, global_state: StateManager, engine: Any) -> None:        
+    self.global_state = global_state
     
     options = Container(
+      direction='col',
+      child_spacing=0,
+      padding=0,
       children=[
-        ButtonWith(
-          text='add',
-          font_size=20,
-          gap=10,
-          background_color=lambda: (255, 200, 200, 255) if selected_mode.get() == 'add' else (200, 200, 200, 255),
-          on_click=lambda e, n: selected_mode.set('add'),
-          dropdown_content=Container(
-            background_color=Controlled((230, 230, 230, 255)),
-            child_alignment='left',
-            children=[
-              Container(
-                padding=10,
-                background_color=(200, 200, 200, 255),
+        Container(
+          child_alignment='space_between',
+          min_width=300,
+          padding=2,
+          children=[
+            MySurface(
+              label('select mode', 'Arial', 15)
+            )
+          ]
+        ),
+        Container(
+          children=[
+            ButtonWith(
+              text='add',
+              font_size=20,
+              gap=10,
+              background_color=lambda: (255, 200, 200, 255) if isinstance(global_state.current_state, Add) else (200, 200, 200, 255),
+              on_click=lambda e, n: global_state.set_state(Add('triangle')),
+              dropdown_content=Container(
+                background_color=Controlled((230, 230, 230, 255)),
+                child_alignment='left',
                 children=[
-                  MySurface(
-                    surface=circle_graphic(50),
-                    show_outline= lambda: selected_shape.get() == 'circle',
-                    on_click= lambda e, n: selected_shape.set('circle')
+                  Container(
+                    padding=10,
+                    background_color=(200, 200, 200, 255),
+                    children=[
+                      MySurface(
+                        surface=circle_graphic(50),
+                        show_outline= lambda: isinstance(global_state.current_state, Add) and global_state.current_state.selected_object == 'circle',
+                        on_click= lambda e, n: global_state.set_state(Add('circle'))
+                      ),
+                      MySurface(
+                        surface=triangle_graphic(50),
+                        show_outline= lambda : isinstance(global_state.current_state, Add) and global_state.current_state.selected_object == 'triangle',
+                        on_click = lambda e, n:global_state.set_state(Add('triangle'))
+                      ),
+                      MySurface(
+                        surface=square_graphic(50),
+                        show_outline=lambda: isinstance(global_state.current_state, Add) and global_state.current_state.selected_object == 'square',
+                        on_click=lambda e, n: global_state.set_state(Add('square'))
+                      )
+                    ]
                   ),
-                  MySurface(
-                    surface=triangle_graphic(50),
-                    show_outline= lambda : selected_shape.get() == 'triangle',
-                    on_click = lambda e, n: selected_shape.set('triangle')
-                  ),
-                  MySurface(
-                    surface=square_graphic(50),
-                    show_outline=lambda: selected_shape.get() == 'square',
-                    on_click=lambda e, n: selected_shape.set('square')
+                  ButtonWith(
+                    text='more..',
+                    dropdown_content=None,
+                    font_size=20
                   )
-                ]
+                ],
+                padding=10,
+                child_spacing=10
               ),
-              ButtonWith(
-                text='more..',
-                dropdown_content=None,
-                font_size=20
+            ),
+            ButtonWith(
+              text='drag',
+              font_size=20,
+              background_color=lambda: (255, 200, 200, 255) if isinstance(global_state.current_state, Drag) else (200, 200, 200, 255),
+              on_click=lambda e,n: global_state.set_state(Drag()),
+              dropdown_content=None
+            ),
+            ButtonWith(
+              text='delete',
+              font_size=20,
+              background_color=lambda: (255, 200, 200, 255) if isinstance(global_state.current_state, Delete) else (200, 200, 200, 255),
+              on_click=lambda e,n: global_state.set_state(Delete()),
+              dropdown_content=None
+            ),
+            ButtonWith(
+              text='clear..', 
+              font_size=20, 
+              gap=10,
+              dropdown_content=Container(
+                direction='col',
+                children=[
+                  ButtonWith(text='movable items', font_size=20, dropdown_content=None, on_click=lambda e, n: engine.remove_movable_bodies()),
+                  ButtonWith(text='all items', font_size=20, dropdown_content=None),
+                ],
+                background_color=(230, 230, 230, 255),
+                min_height=300,
+                padding=5
               )
-            ],
-            padding=10,
-            child_spacing=10
-          ),
-        ),
-        ButtonWith(
-          text='drag',
-          font_size=20,
-          background_color=lambda: (255, 200, 200, 255) if selected_mode.get() == 'drag' else (200, 200, 200, 255),
-          on_click=lambda e,n: selected_mode.set('drag'),
-          dropdown_content=None
-        ),
-        ButtonWith(
-          text='delete',
-          font_size=20,
-          background_color=lambda: (255, 200, 200, 255) if selected_mode.get() == 'delete' else (200, 200, 200, 255),
-          on_click=lambda e,n: selected_mode.set('delete'),
-          dropdown_content=None
-        ),
-        ButtonWith(
-          text='clear..', 
-          font_size=20, 
-          gap=10,
-          dropdown_content=Container(
-            direction='col',
-            children=[
-              ButtonWith(text='movable items', font_size=20, dropdown_content=None),
-              ButtonWith(text='all items', font_size=20, dropdown_content=None),
-            ],
-            background_color=(230, 230, 230, 255),
-            min_height=300,
-            padding=5
-          )
+            )
+          ],
+          child_alignment='right',
+          background_color=(230, 230, 230, 255),
+          padding=5,
+          min_width=300
         )
-      ],
-      child_alignment='right',
-      background_color=(230, 230, 230, 255),
-      padding=5
+      ]
     )
-    
     options = PositionedUINode(
       options,
       lambda n: Vector2(SCREEN_WIDTH - n.width_height[0] - 20, 20)
     )
+    load_save = Container(
+      child_alignment='left',
+      background_color=(230, 230, 230, 255),
+      padding=5,
+      min_width=300,
+      children=[
+        ButtonWith(
+          text='load',
+          dropdown_content=None,
+        ),
+        ButtonWith(
+          text='save',
+          dropdown_content=None
+        ),
+      ]
+    )
+    load_save = PositionedUINode(load_save, Vector2(20, 20))
+    self.positioned_nodes = [options, load_save]
+
+  def handle_input(self, mouse_event: MouseEvent):
+    """
+      consume the mouse_event. \n
+      return the mouse_event if unconsumed, else noen
+    """
+    best = None
+    for p_node in self.positioned_nodes:
+      best = p_node.node.get_best_hitbox(mouse_event)
+      if best:
+        break
     
+    all_hitboxes = [h for p_node in self.positioned_nodes for h in p_node.node.get_all_hitboxes()]
+    for h in all_hitboxes:
+      h.update_mouse_over(mouse_event, h == best)
+    
+    return mouse_event if (best == None) else None
+  
+  def draw(self, surface: Surface):
+    for p_node in self.positioned_nodes:
+      p_node.draw_node(surface)
+  
+  # for debugging, draw only UI layer
+  def play(self):
+    
+    self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+    self.clock = pygame.time.Clock()
+    self.running = True
     self.mouse_down = False
     while self.running:      
       mouse_pos_frame = Vector2(pygame.mouse.get_pos())
       mouse_event: MouseEvent = MouseEvent(mouse_pos_frame, set())
-      mouse_event.types.add('hover')
       
       for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -733,20 +760,15 @@ class UILayer:
         if event.type == pygame.MOUSEBUTTONUP:
           mouse_event.types.add('mouseup')
           self.mouse_down = False
-      
 
       # process mouse events
-      best = options.node.get_best_hitbox(mouse_event)
-      for h in options.node.get_all_hitboxes():
-        h.update_mouse_over(mouse_event, h == best)
-      
+      self.handle_input(mouse_event)
       
       # draw nodes
       self.screen.fill((255, 255, 255))
       for x in range(0, SCREEN_WIDTH, 50):
         pygame.draw.line(self.screen, (200, 200, 200), Vector2(x, 0), Vector2(x, SCREEN_HEIGHT))
-
-      options.draw_node(self.screen)
-
+        
+      self.draw(self.screen)
       pygame.display.flip()
       self.clock.tick(60)

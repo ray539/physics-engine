@@ -1,48 +1,19 @@
+from abc import ABC
 import pickle
-from typing import cast
+from typing import Literal, cast
 import pygame
 from pygame.math import Vector2
 from pygame.surface import Surface
 from collusion import CollusionData, avg, collide
+from common import StateManager
 from constants import GRAVITY, SCREEN_HEIGHT, SCREEN_WIDTH
 from classes import Polygon
 from engine import Engine
 from helper import get_square, rot_90_c, screen_to_world, world_to_screen
 from copy import deepcopy
-
 from input import MouseEvent
 from ui import UILayer, label
 
-
-def draw_polygon(polygon: Polygon, surface: Surface):
-  if polygon.mass > 0:
-    # if self.engine_polygon.resting:
-    #   self.fill_color = (0, 255, 0)
-    # else:
-    fill_color = (255, 0, 0)
-  else:
-    fill_color = (0, 0, 255)
-  border_color = tuple([200 if c == 0 else c for c in fill_color])
-  border_thickness = 2
-  
-  screen_points = world_to_screen(polygon.get_points_global())
-  mid = avg(screen_points)
-  
-  pygame.draw.polygon(surface, fill_color, screen_points)
-  lab = label(str(polygon.body_id), 'Arial', 10)
-  rect = pygame.Rect((0, 0), (lab.get_width(), lab.get_height()))
-  rect.center = (int(mid.x), int(mid.y))
-  surface.blit(lab, rect)
-
-def draw_arrow(start: Vector2, end: Vector2, surface: pygame.Surface):
-  pygame.draw.line(surface, (0, 0, 255), world_to_screen(start), world_to_screen(end), 2)
-  # start -> end
-  lv = end - start
-  perp = rot_90_c(lv) * 0.1
-  o = start + lv * 0.9
-  a = o + perp
-  c = o - perp
-  pygame.draw.polygon(surface, (0, 0, 255), world_to_screen([a, end, c]))
 
 # each object has a 'click' event handler
 # this is how we will interact with the objects 
@@ -52,7 +23,9 @@ class Controller:
     self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     self.clock = pygame.time.Clock()
     self.running = False
-    self.engine = Engine()
+    
+    self.global_state = StateManager()
+    self.engine = Engine(self.global_state)
     
     self.engine.add_polygonal_body(
       [
@@ -73,13 +46,9 @@ class Controller:
           Vector2(0, 100) + Vector2(400, y)
         ]
       )
-
-
+      
     
-    # for detecting clicks
-    self.mouse_down = False
-    
-    self.mode = 1
+    self.ui_layer = UILayer(self.global_state, self.engine)
   
   def debug_mode(self):
     self.running = True
@@ -156,10 +125,8 @@ class Controller:
       self.screen.fill('white')
 
       # draw the objects here
-      for b in self.engine.bodies:
-        draw_polygon(b, self.screen)
-        draw_arrow(b.center_of_mass, b.center_of_mass + b.linear_velocity, self.screen)
-
+      self.engine.draw(self.screen)
+      
       for cd in last_frame_collusions:
         for p in cd.contact_points:
           pygame.draw.circle(self.screen, (0, 0, 0), world_to_screen(p), 5)
@@ -169,15 +136,12 @@ class Controller:
     pygame.quit()
   
   def play(self):
-    self.running = True
     
+    self.running = True
     while self.running:
-      
       mouse_pos_frame = Vector2(pygame.mouse.get_pos())
       mouse_event: MouseEvent = MouseEvent(mouse_pos_frame, set())
-      mouse_event.types.add('hover')
 
-      screen_click = False
       for event in pygame.event.get():
         if event.type == pygame.QUIT:
           self.running = False
@@ -185,13 +149,9 @@ class Controller:
         
         if event.type == pygame.MOUSEBUTTONDOWN:
           mouse_event.types.add('mousedown')
-          self.mouse_down = True
         
         if event.type == pygame.MOUSEBUTTONUP:
           mouse_event.types.add('mouseup')
-          if self.mouse_down:
-            screen_click = True
-          self.mouse_down = False
         
         if event.type == pygame.KEYDOWN:
           # clear 
@@ -199,18 +159,6 @@ class Controller:
             print('removed all movable entities')
             self.engine.bodies = [b for b in self.engine.bodies if b.mass < 0]
             self.engine.id_gen = len(self.engine.bodies)
-            
-          elif event.key == pygame.K_1:
-            self.mode = 1
-          elif event.key == pygame.K_2:
-            self.mode = 2
-          elif event.key == pygame.K_3:
-            pass
-      
-      if screen_click:
-        mouse_event.types.add('click')
-        
-
       
       # say we have a click / hover event
       # - first, make the UI consume the click / hover / mousedown / mouseup
@@ -220,22 +168,24 @@ class Controller:
       # - tell the engine all the events that have occured
       # - so, clicks transformed into world coordinates
       # - also any unconsumed hover, make the color change or something
-      self.engine.preupdate(mouse_event)
+      mouse_event_2 = self.ui_layer.handle_input(mouse_event)
+      self.engine.handle_input(mouse_event_2)
       
+      # draw items      
       self.screen.fill('white')
-      # draw engine items
-      for b in self.engine.bodies:
-        draw_polygon(b, self.screen)
-        draw_arrow(b.center_of_mass, b.center_of_mass + b.linear_velocity, self.screen)
+
+      self.engine.draw(self.screen)
+      self.ui_layer.draw(self.screen)
       
+      # reset to false
+      self.global_state.changed_frame = False
       
       self.engine.update(1 / 60)
-      
       pygame.display.flip()
       self.clock.tick(60)
 
     pygame.quit()
 
 if __name__ == '__main__':
-  l = UILayer()
+  l = Controller()
   l.play()

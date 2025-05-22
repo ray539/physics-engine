@@ -8,5 +8,5 @@ from pygame import Vector2
 @dataclass
 class MouseEvent:
   position: Vector2
-  types: set[Literal['click', 'hover', 'mousedown', 'mouseup']]
+  types: set[Literal['mousedown', 'mouseup']]
   
