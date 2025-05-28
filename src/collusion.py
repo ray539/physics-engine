@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pygame import Rect
 from pygame.math import Vector2
+from common import avg
 from constants import COE
 from helper import *
 from classes import Polygon
@@ -173,8 +174,6 @@ def recalculate_penetration(collusion_data: CollusionData):
   d = range1[1] - range2[0]
   return d
 
-def avg(points: list[Vector2]):
-  return Vector2(sum(map(lambda p: p.x, points)) / len(points), sum(map(lambda p: p.y, points)) / len(points))
 
 def resolve_penetration(collusion_data: CollusionData):
   objA = collusion_data.objA

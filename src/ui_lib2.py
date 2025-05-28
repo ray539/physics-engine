@@ -91,7 +91,7 @@ class HitBox:
       on_mouserelease: Callable[[MouseEvent], Any] = lambda e: None,
       on_click: Callable[[MouseEvent], Any] = lambda e: None,
     ) -> None:
-    self.owoner = owner
+    self.owner = owner
     self.rect = rect    
     self.on_mouseenter = on_mouseenter
     self.on_mouseleave = on_mouseleave
@@ -313,7 +313,6 @@ class UINode(ABC):
       attr_val = getattr(self, attr_name)
       if isinstance(attr_val, Controlled):
         attr_val.cache_clear()
-
 
 
 def lighten(color: AlphaColor, amount: int) -> AlphaColor:

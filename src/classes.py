@@ -1,10 +1,15 @@
+import pygame
 from pygame.math import Vector2
-from pygame import Rect
+from pygame import Rect, Surface
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
+from common import avg
+from common import draw_arrow, label
 from constants import DELTA, DELTA_THETA, GRAVITY, RESTING_CONTACT_THRES
 from helper import *
 import math
+
+from ui_lib2 import AlphaColor, lighten
 
 class RigidBody(ABC):
   def __init__(self):
@@ -55,6 +60,32 @@ class Polygon(RigidBody):
     
     self.touching: set[Polygon] = set()
     # self.touching_prev: set[int] = set()
+    
+    
+    # for drawing
+    self.fill_color: AlphaColor = (255, 0, 0, 255) if self.mass > 0 else (0, 0, 255, 255)
+    self.border_color: AlphaColor = lighten(self.fill_color, 30)
+    self.border_thickness = 0
+    self.draw_vel_vector = True
+    
+    # for on drag state
+    self.is_being_dragged = False
+
+  def draw(self, screen: Surface):
+    screen_points = world_to_screen(self.get_points_global())
+    mid = avg(screen_points)
+    pygame.draw.polygon(screen, self.fill_color, screen_points)
+    lab = label(str(self.body_id), 'Arial', 10)
+    rect = pygame.Rect((0, 0), (lab.get_width(), lab.get_height()))
+    rect.center = (int(mid.x), int(mid.y))
+    screen.blit(lab, rect)
+    if self.border_thickness > 0:
+      pygame.draw.polygon(screen, self.border_color, screen_points, self.border_thickness)
+    
+    if self.draw_vel_vector:
+      draw_arrow(self.center_of_mass, self.center_of_mass + self.linear_velocity, screen)
+    
+    
 
   def get_bounding_box_global(self):
     global_points = self.get_points_global()
@@ -117,6 +148,8 @@ class Polygon(RigidBody):
       # immovable
       return
     if self.resting:
+      return
+    if self.is_being_dragged:
       return
 
     # forces will update the acceleration

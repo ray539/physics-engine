@@ -11,36 +11,6 @@ import pickle
 from ui_lib2 import HitBox, MouseEvent
 
 
-def draw_polygon(polygon: Polygon, surface: Surface):
-  if polygon.mass > 0:
-    # if self.engine_polygon.resting:
-    #   self.fill_color = (0, 255, 0)
-    # else:
-    fill_color = (255, 0, 0)
-  else:
-    fill_color = (0, 0, 255)
-  border_color = tuple([200 if c == 0 else c for c in fill_color])
-  border_thickness = 2
-  
-  screen_points = world_to_screen(polygon.get_points_global())
-  mid = avg(screen_points)
-  
-  pygame.draw.polygon(surface, fill_color, screen_points)
-  lab = label(str(polygon.body_id), 'Arial', 10)
-  rect = pygame.Rect((0, 0), (lab.get_width(), lab.get_height()))
-  rect.center = (int(mid.x), int(mid.y))
-  surface.blit(lab, rect)
-
-def draw_arrow(start: Vector2, end: Vector2, surface: pygame.Surface):
-  pygame.draw.line(surface, (0, 0, 255), world_to_screen(start), world_to_screen(end), 2)
-  # start -> end
-  lv = end - start
-  perp = rot_90_c(lv) * 0.1
-  o = start + lv * 0.9
-  a = o + perp
-  c = o - perp
-  pygame.draw.polygon(surface, (0, 0, 255), world_to_screen([a, end, c]))
-
 def info_to_graphic(obj_info: ObjectInformation, color: tuple[int, int, int, int]):
   if isinstance(obj_info, PolygonInformation):
     # draw full scale object
@@ -92,7 +62,7 @@ class Drawable:
 
 class StateInstance(ABC):
   @abstractmethod
-  def handle_input(self, mouse_event: MouseEvent):
+  def handle_input(self, mouse_event: MouseEvent | None):
     """
       handle mouse event
     """
@@ -102,13 +72,12 @@ class EmptyStateInstance(StateInstance):
   def __init__(self) -> None:
     super().__init__()
   
-  def handle_input(self, mouse_event: MouseEvent):
+  def handle_input(self, mouse_event: MouseEvent | None):
     return
 
 class AddStateInstance(StateInstance):
   def __init__(self, add_state: Add, engine: 'Engine', mouse_pos: Vector2) -> None:
     # initialize hitboxes
-    
     l = [o for o in add_state.avaliable_objects if o.id == add_state.selected_id]
     obj = l[0] if len(l) > 0 else None
     
@@ -147,22 +116,130 @@ class AddStateInstance(StateInstance):
       on_click=on_click
     )
   
-  def handle_input(self, mouse_event: MouseEvent):
+  def handle_input(self, mouse_event: MouseEvent | None):
     # remember to update the engine's draw function here
-    if self.thing:
+    if self.thing and mouse_event:
       self.thing.center_pos = mouse_event.position
 
-    self.screen_hitbox.update(mouse_event, self.screen_hitbox.rect.collidepoint(mouse_event.position))
+    self.screen_hitbox.update(mouse_event if mouse_event else MouseEvent(Vector2(-1, -1), 'none'), self.screen_hitbox.rect.collidepoint(mouse_event.position) if mouse_event else False)
     
     if self.thing:
       self.engine.extra_to_draw_frame = [self.thing.get_drawable()]
     else:
       self.engine.extra_to_draw_frame = []
 
+# for drag
+# - all polygons have hitboxes
+# - on hover, make it slightly lighter
+# - on press, start drag motion
+# - on release ...
+
+class DragablePolygon:
+  def __init__(self, polygon: Polygon) -> None:
+    self.polygon = polygon
+    bound_box = polygon.get_bounding_box_global()
+    
+    self.POLYGON_ORIG_FILL_COLOR: AlphaColor = polygon.fill_color
+    self.HOVER_COLOR: AlphaColor = (0, 100, 0, 255)
+    self.SELECTED_COLOR: AlphaColor = (0, 255, 0, 255)
+    self.NO_COLOR: AlphaColor = (0, 0, 0, 0)
+    self.hitbox_color: AlphaColor = self.NO_COLOR
+    
+    self.offset: Vector2 | None = None
+
+    def on_mouseenter(e: MouseEvent):
+      self.hitbox_color = self.HOVER_COLOR
+
+    def on_mousepress(e: MouseEvent):
+      self.polygon.is_being_dragged = True
+      self.offset = e.position - self.hitbox.rect.topleft
+      
+      self.hitbox_color = self.SELECTED_COLOR
+      self.polygon.fill_color = lighten(self.POLYGON_ORIG_FILL_COLOR, 150)
+      
+    def on_mouserelease(e: MouseEvent):
+      self.polygon.is_being_dragged = False
+      self.offset = None
+      
+      self.hitbox_color = self.HOVER_COLOR
+      self.polygon.fill_color = self.POLYGON_ORIG_FILL_COLOR
+      
+    def on_mouseleave(e: MouseEvent):
+      self.polygon.is_being_dragged = False
+      self.offset = None
+      
+      self.hitbox_color = self.NO_COLOR
+      self.polygon.fill_color = self.POLYGON_ORIG_FILL_COLOR
+      
+      print('here')
+    
+    self.hitbox = HitBox(
+      owner = self,
+      rect = bound_box,
+      on_mouseenter = on_mouseenter,
+      on_mousepress = on_mousepress,
+      on_mouserelease= on_mouserelease,
+      on_mouseleave= on_mouseleave
+    )
+    
+  def react_to_mouse_move(self, mouse_pos: Vector2 | None):
+    # the speed polygon is left with is (cur_pos - prev_pos) * FPS
+    
+    # mouse_pos - (new_tl) = offset
+    # new_tl = mouse_pos - offset
+    if self.offset and mouse_pos:
+      new_top_left = mouse_pos - self.offset
+      # so, the top_left of the polygon's bounding box needs to be new top left
+      # update the polygon
+      bound_box = self.polygon.get_bounding_box_global()
+      to_move = new_top_left - bound_box.topleft
+      
+      self.polygon.linear_velocity = to_move * 60
+      self.polygon.center_of_mass += to_move
+    
+    # either way, update the hitbox
+    self.hitbox.rect = self.polygon.get_bounding_box_global()
+  
+  def get_hitbox_drawable(self):
+    hitbox_rect = self.hitbox.rect
+    to_draw = Surface((hitbox_rect.width, hitbox_rect.height), pygame.SRCALPHA)
+    pygame.draw.rect(to_draw, self.hitbox_color, Rect((0, 0), (hitbox_rect.width, hitbox_rect.height)), 2)
+    
+    return Drawable(to_draw, Vector2(hitbox_rect.bottomleft))
+
+class DragStateInstance(StateInstance):
+  
+  def __init__(self, drag_state: Drag, engine: 'Engine') -> None:
+    
+    self.engine = engine
+    # so, for every movable polygon, add a hitbox
+    self.dragable_polygons: list[DragablePolygon] = [DragablePolygon(p) for p in self.engine.bodies if p.mass > 0]
+  
+  def handle_input(self, mouse_event: MouseEvent | None): 
+    # react to mouse_movement (if anything is clicked)
+    for b in self.dragable_polygons:
+      b.react_to_mouse_move(mouse_event.position if mouse_event else None)
+    
+    # get best hitbox
+    best = None
+    for b in self.dragable_polygons:
+      tmp = b.hitbox.rect.collidepoint(mouse_event.position) if mouse_event else None
+      if tmp:
+        best = b.hitbox
+        break
+    
+    # process clicks and stuff
+    for b in self.dragable_polygons:
+      b.hitbox.update(mouse_event if mouse_event else MouseEvent(Vector2(-1, -1), 'none'), b.hitbox == best)
+
+    self.engine.extra_to_draw_frame = [b.get_hitbox_drawable() for b in self.dragable_polygons]
+
 
 def get_new_state_instance_from_global(global_state: StateManager, engine: 'Engine', mouse_pos: Vector2):
   if isinstance(global_state.current_state, Add):
     return AddStateInstance(global_state.current_state, engine, mouse_pos)
+  elif isinstance(global_state.current_state, Drag):
+    return DragStateInstance(global_state.current_state, engine)
   return EmptyStateInstance()
 
 
@@ -175,7 +252,7 @@ def worldify_mouse_event(mouse_event: MouseEvent | None):
     mouse_event2 = deepcopy(mouse_event)
     mouse_event2.position = screen_to_world(mouse_event.position)
   else:
-    mouse_event2 = MouseEvent(Vector2(-100, -100), 'none')
+    return None
   return mouse_event2
 
 class Engine:
@@ -279,8 +356,7 @@ class Engine:
   
   def draw(self, surface: Surface):
     for b in self.bodies:
-      draw_polygon(b, surface)
-      draw_arrow(b.center_of_mass, b.center_of_mass + b.linear_velocity, surface)
+      b.draw(surface)
       
     for d in self.extra_to_draw_frame:
       surface.blit(d.to_draw, world_to_screen(d.top_left))
@@ -300,20 +376,14 @@ class Engine:
     # - leave: delete transparent marker
     # - press: make marker less transparent
     # - release: make marker transparent
-    # for drag
-    # - all polygons have hitboxes
-    # - on hover, make it slightly lighter
-    # - on press, start drag motion
-    # - on release ...
+
     # for delete
     # - screen no hitbox, but each polygon has it's own hitbox
     # - on click, the object gets deleted
     mouse_event = worldify_mouse_event(mouse_event)
     if self.global_state_manager.has_notification(self):
-      self.instance_state = get_new_state_instance_from_global(self.global_state_manager, self, mouse_event.position)
+      self.instance_state = get_new_state_instance_from_global(self.global_state_manager, self, mouse_event.position if mouse_event else Vector2(-1, -1))
       self.global_state_manager.consume_notification(self)
-
-
     self.instance_state.handle_input(mouse_event)
   
   def update(self, dt: float):

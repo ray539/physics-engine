@@ -6,7 +6,7 @@ from typing import Literal
 import pygame
 from pygame import Surface, Vector2
 
-from helper import world_to_screen
+from helper import rot_90_c, world_to_screen
 
 
 # game state
@@ -219,3 +219,17 @@ def label(text: str, font_name: str, font_size: int, highlight: bool = False):
   b1.fill((0, 200, 0) if highlight else (230, 230, 230))
   b1.blit(a1, (5, 5))
   return b1
+
+
+def draw_arrow(start: Vector2, end: Vector2, surface: pygame.Surface):
+  pygame.draw.line(surface, (0, 0, 255), world_to_screen(start), world_to_screen(end), 2)
+  # start -> end
+  lv = end - start
+  perp = rot_90_c(lv) * 0.1
+  o = start + lv * 0.9
+  a = o + perp
+  c = o - perp
+  pygame.draw.polygon(surface, (0, 0, 255), world_to_screen([a, end, c]))
+  
+def avg(points: list[Vector2]):
+  return Vector2(sum(map(lambda p: p.x, points)) / len(points), sum(map(lambda p: p.y, points)) / len(points))
