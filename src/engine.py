@@ -3,14 +3,13 @@ from typing import cast
 from pygame.math import Vector2
 from classes import *
 from collusion import *
-from common import Add, Drag, StateManager, circle_graphic, square_graphic, triangle_graphic
+from common import Add, CircleInformation, Drag, ObjectInformation, PolygonInformation, State, StateManager, circle_graphic, get_polygon_surface, get_width_height, label, square_graphic, triangle_graphic
 from constants import CONTACT_RESOLVER_MAX_ITERATIONS, SCREEN_WIDTH, VELOCITY_RESOLVER_MAX_ITERATIONS
 from pygame import Surface
 import pygame
 import pickle
+from ui_lib2 import HitBox, MouseEvent
 
-from input import MouseEvent
-from ui import HitBox, label
 
 def draw_polygon(polygon: Polygon, surface: Surface):
   if polygon.mass > 0:
@@ -42,34 +41,41 @@ def draw_arrow(start: Vector2, end: Vector2, surface: pygame.Surface):
   c = o - perp
   pygame.draw.polygon(surface, (0, 0, 255), world_to_screen([a, end, c]))
 
-
-def name_to_graphic(name: str, color: tuple[int, int, int, int]):
-  if name == 'circle':
+def info_to_graphic(obj_info: ObjectInformation, color: tuple[int, int, int, int]):
+  if isinstance(obj_info, PolygonInformation):
+    # draw full scale object
+    local_points = obj_info.local_points
+    surf = get_polygon_surface(local_points, color)
+    return surf
+  elif isinstance(obj_info, CircleInformation):
     return circle_graphic(100, color)
-  elif name == 'square':
-    return square_graphic(100, color)
-  return triangle_graphic(100, color)
+  return Surface((0, 0))
 
 class Thing:
-  def __init__(self, selected_object: str, color: tuple[int, int, int], center_pos: Vector2) -> None:
-    self.selected_object = selected_object
+  def __init__(self, obj_info: ObjectInformation, color: tuple[int, int, int], center_pos: Vector2) -> None:
+    self.obj_info = obj_info
     self.light = True
     self.color = color
     self.center_pos = center_pos
+    
   
   def get_drawable(self):
     res_color = (self.color[0], self.color[1], self.color[2], 100 if self.light else 255)
-    surf = name_to_graphic(self.selected_object, res_color)
+    surf = info_to_graphic(self.obj_info, res_color)
     w, h = surf.get_width(), surf.get_height()
-    
     top_left = self.center_pos + Vector2(- w / 2, h / 2)
     return Drawable(surf, top_left)
   
-  # def draw(self, dest_surface: Surface, center_coords: Vector2):
-  #   res_color = (self.color[0], self.color[1], self.color[2], 200 if self.light else 255)
-  #   surf = name_to_graphic(self.selected_object, res_color)
-  #   w, h = surf.get_width(), surf.get_height()
-  #   dest_surface.blit(surf, center_coords + Vector2(w / 2, h / 2))
+  def get_global_points(self) -> list[Vector2]:
+    """
+      if thing is a polygon, get global points in world coordinates
+    """
+    # local_points
+    if isinstance(self.obj_info, PolygonInformation):
+      w, h = get_width_height(self.obj_info.local_points)
+      top_left = self.center_pos + Vector2(- w / 2, h / 2)
+      return [p + top_left for p in self.obj_info.local_points]
+    return []
 
 # for add
 # object == 'triangle', 'circle', 'square'
@@ -91,16 +97,27 @@ class StateInstance(ABC):
       handle mouse event
     """
 
+class EmptyStateInstance(StateInstance):
+  
+  def __init__(self) -> None:
+    super().__init__()
+  
+  def handle_input(self, mouse_event: MouseEvent):
+    return
+
 class AddStateInstance(StateInstance):
-  def __init__(self, selected_object: str, engine: 'Engine', mouse_pos: Vector2) -> None:
+  def __init__(self, add_state: Add, engine: 'Engine', mouse_pos: Vector2) -> None:
     # initialize hitboxes
-    self.thing: Thing | None = Thing(selected_object, (255, 0, 0), mouse_pos)
+    
+    l = [o for o in add_state.avaliable_objects if o.id == add_state.selected_id]
+    obj = l[0] if len(l) > 0 else None
+    
+    self.thing: Thing | None = Thing(obj, (255, 0, 0), mouse_pos) if obj else None
     self.engine = engine
     
     def on_mouseenter(mouse_event: MouseEvent):
-      print('here')
       pos = mouse_event.position
-      self.thing = Thing(selected_object, (255, 0, 0), pos)
+      self.thing = Thing(obj, (255, 0, 0), mouse_pos) if obj else None
     
     def on_mouseleave(mouse_event: MouseEvent):
       self.thing = None
@@ -115,8 +132,13 @@ class AddStateInstance(StateInstance):
     
     def on_click(mouse_event: MouseEvent):
       pos = mouse_event.position
+      if isinstance(obj, PolygonInformation):
+        if self.thing:
+          points = self.thing.get_global_points()
+          self.engine.add_polygonal_body(points, False)
     
     self.screen_hitbox = HitBox(
+      self,
       pygame.Rect((0, 0), (SCREEN_WIDTH, SCREEN_HEIGHT)),
       on_mouseenter=on_mouseenter,
       on_mouseleave=on_mouseleave,
@@ -130,7 +152,7 @@ class AddStateInstance(StateInstance):
     if self.thing:
       self.thing.center_pos = mouse_event.position
 
-    self.screen_hitbox.update_mouse_over(mouse_event, self.screen_hitbox.rect.collidepoint(mouse_event.position))
+    self.screen_hitbox.update(mouse_event, self.screen_hitbox.rect.collidepoint(mouse_event.position))
     
     if self.thing:
       self.engine.extra_to_draw_frame = [self.thing.get_drawable()]
@@ -140,8 +162,9 @@ class AddStateInstance(StateInstance):
 
 def get_new_state_instance_from_global(global_state: StateManager, engine: 'Engine', mouse_pos: Vector2):
   if isinstance(global_state.current_state, Add):
-    return AddStateInstance(global_state.current_state.selected_object, engine, mouse_pos)
-  return AddStateInstance('circle', engine, mouse_pos)
+    return AddStateInstance(global_state.current_state, engine, mouse_pos)
+  return EmptyStateInstance()
+
 
 def worldify_mouse_event(mouse_event: MouseEvent | None):
   """
@@ -152,17 +175,19 @@ def worldify_mouse_event(mouse_event: MouseEvent | None):
     mouse_event2 = deepcopy(mouse_event)
     mouse_event2.position = screen_to_world(mouse_event.position)
   else:
-    mouse_event2 = MouseEvent(Vector2(-100, -100), set())
+    mouse_event2 = MouseEvent(Vector2(-100, -100), 'none')
   return mouse_event2
 
 class Engine:
-  def __init__(self, global_state: StateManager):
+  def __init__(self, global_state_manager: StateManager):
     self.bodies: list[Polygon] = []
     self.timer = 0
     self.id_gen = 0
 
-    self.global_state = global_state
-    self.instance_state: StateInstance = get_new_state_instance_from_global(global_state, self, Vector2(-1, -1))
+    self.global_state_manager = global_state_manager
+    self.global_state_manager.add_subscriber(self)
+    
+    self.instance_state: StateInstance = get_new_state_instance_from_global(global_state_manager, self, Vector2(-1, -1))
     self.extra_to_draw_frame: list[Drawable] = []
     
     self.pressed = False
@@ -284,9 +309,10 @@ class Engine:
     # - screen no hitbox, but each polygon has it's own hitbox
     # - on click, the object gets deleted
     mouse_event = worldify_mouse_event(mouse_event)
-    if self.global_state.changed_frame:
-      print('here')
-      self.instance_state = get_new_state_instance_from_global(self.global_state, self, mouse_event.position)
+    if self.global_state_manager.has_notification(self):
+      self.instance_state = get_new_state_instance_from_global(self.global_state_manager, self, mouse_event.position)
+      self.global_state_manager.consume_notification(self)
+
 
     self.instance_state.handle_input(mouse_event)
   

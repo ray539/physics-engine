@@ -1,33 +1,40 @@
-from copy import deepcopy
+from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Generic, Literal, TypeVar, cast
 import pygame
-from pygame.math import Vector2
-from pygame.surface import Surface
-from common import Add, Delete, Drag, StateManager, circle_graphic, square_graphic, triangle_graphic
-from constants import SCREEN_HEIGHT, SCREEN_WIDTH
-from abc import ABC, abstractmethod
-from collections.abc import Callable
+from pygame import Surface, Vector2
+
+from common import StateManager
 from helper import to_tuple
 from input import MouseEvent
-pygame.init()
 
 @dataclass
 class Drawable:
   to_draw: Surface
   dest_top_left: Vector2
   offset: Vector2
-  
+
+class Globals:
+  def __init__(self) -> None:
+    self.state_changed_in_frame = False
+    self.calculated_in_frame = set[object]()
+
+globals = Globals()
+
 T = TypeVar('T')
 class Controlled(Generic[T]):
   """
     wrapper to make value mutable\n
     free: whether the UINode can also set this value freely
   """
-  def __init__(self, val:  T | 'Controlled[T]' | Callable[[], T], free:bool = False) -> None:
+  def __init__(self, val:  T | 'Controlled[T]' | Callable[[], T], free:bool = False, special: bool = False) -> None:
     super().__init__()
     self.free: bool = free
     self.val: T | Callable[[], T]
+    
+    self.special = special
+    self.cached: T | None = None
     
     if isinstance(val, Controlled):
       # copy 'other'
@@ -36,7 +43,7 @@ class Controlled(Generic[T]):
       self.free = other.free
       
     elif isinstance(val, Callable):
-      # val = cast(Callable[[], T], val)
+      val = cast(Callable[[], T], val)
       self.val = val
     else:
       self.val = val
@@ -46,7 +53,7 @@ class Controlled(Generic[T]):
       set value of this mutable.
     """
     self.val = val
-    
+
   def set_if_free(self, val: T):
     """
       set value if this value is free
@@ -57,7 +64,14 @@ class Controlled(Generic[T]):
   
   def get(self) -> T:
     if isinstance(self.val, Callable):
-      return self.val() # type: ignore
+      # if not globals.state_changed_in_frame and (self.cached != None):
+      #   return self.cached
+      if self.cached == None or (globals.state_changed_in_frame and self not in globals.calculated_in_frame):
+        self.cached = self.val() # type: ignore
+        globals.calculated_in_frame.add(self)
+    
+      return self.cached # type: ignore
+      
     return self.val
 
 
@@ -72,15 +86,15 @@ Param = T | Controlled[T] | Callable[[], T]
   Use parse_param() to turn it into a controllable for UINode use.
 """
 
-def parse_param(val: Param[T]) -> Controlled[T]:
+def parse_param(val: Param[T], special:bool = False) -> Controlled[T]:
   """
     given val: T | Controlled[T] | () -> T \n
     turn it into 'Controlled' type which is locked <-> the given controlled type is locked
   """
   if isinstance(val, Callable):
     val = cast(Callable[[], T], val)
-    return Controlled(val)
-  return Controlled(val)
+    return Controlled(val, special=special)
+  return Controlled(val, special=special)
 
 def lighten(color: tuple[int, int, int, int], amount: int):
   new_color = [min(a + amount, 255) for a in color]
@@ -162,7 +176,8 @@ class UINode(ABC):
                min_height: Param[int] = Controlled(0, True),
                background_color: Param[tuple[int,int,int,int]] = Controlled((200, 200, 200, 255), True)):
 
-    self.children = parse_param(children)
+    self.children = parse_param(children, special=True)
+    
     self.padding = parse_param(padding)
     self.min_width = parse_param(min_width)
     self.min_height = parse_param(min_height)
@@ -321,6 +336,7 @@ class ButtonWith(UINode):
       on_mouserelease=convert(on_mouserelease, on_mouserelease_default, self),
       on_click=on_click_default
     )
+    self.calc_width_height()
 
   def get_button(self) -> Surface:
     if self.background_shade == 'normal':
@@ -400,7 +416,6 @@ class ButtonWith(UINode):
 class MySurface(UINode):
   def __init__(self,    
                surface: pygame.Surface,
-               
                show_outline: Param[bool] = Controlled(False, True),
                on_click: Callable[[MouseEvent, 'MySurface'], Any] | None = None,
                children: list[UINode] = [],
@@ -421,6 +436,7 @@ class MySurface(UINode):
       pygame.Rect((-1, -1), (-1, -1)),
       on_click=convert(on_click, lambda e: None, self)
     )
+    self.calc_width_height()
   
   def calc_width_height(self) -> tuple[int, int]:
     surface = self.OUTLINED_SURF if self.show_outline.get() else self.ORIGINAL_SURF
@@ -447,7 +463,7 @@ class Container(UINode):
                child_alignment: ChildAlignmentType = 'left',
                child_spacing: int = 10,
                direction: Literal['row', 'col'] = 'row',
-               children: list[UINode] = [],
+               children: Param[list[UINode]] = [],
                padding: int = 10, 
                min_width: int = 0, 
                min_height: int = 0, 
@@ -462,6 +478,7 @@ class Container(UINode):
     self.container_hitbox = HitBox(
       pygame.Rect((-1, -1), (-1, -1)),
     )
+    self.calc_width_height()
   
   def process_mouse_event_self(self, mouse_event: MouseEvent) -> bool:
     return False
@@ -473,7 +490,7 @@ class Container(UINode):
     width_height = [0, 0]
     
     width_height[main_dir] = sum([c[main_dir] for c in child_width_heights]) + self.child_spacing * max(num_children - 1, 0) + 2 * self.padding.get()
-    width_height[1 - main_dir] = max([c[1 - main_dir] for c in child_width_heights]) + 2 * self.padding.get()
+    width_height[1 - main_dir] = (max([c[1 - main_dir] for c in child_width_heights]) if len(child_width_heights) > 0 else 0) + 2 * self.padding.get()
     width_height[0] = max(width_height[0], self.min_width.get())
     width_height[1] = max(width_height[1], self.min_height.get())
     self.width_height = cast(tuple[int, int], tuple(width_height))
@@ -531,7 +548,6 @@ class Container(UINode):
     self.is_gr_calculated = True
     
     self.container_hitbox.rect = pygame.Rect(to_tuple(top_left), self.width_height)
-    
     return Drawable(this_to_draw, top_left, this_offset)
   
   def get_all_hitboxes(self) -> list[HitBox]:
@@ -547,7 +563,6 @@ class Container(UINode):
         return tmp
     if self.container_hitbox.rect.collidepoint(mouse_event.position):
       return self.container_hitbox
-      
     return None
 
 class PositionedUINode:
@@ -557,12 +572,15 @@ class PositionedUINode:
     if isinstance(dest_top_left, Callable):
       dest_top_left = dest_top_left(node)
     self.dest_top_left = dest_top_left
+    self.node.get_drawable(self.dest_top_left)
   
   def draw_node(self, dest_surface: Surface):
     self.node.calc_width_height()
     drawable = self.node.get_drawable(self.dest_top_left)
     dest_surface.blit(drawable.to_draw, drawable.dest_top_left + drawable.offset)
-  
+
+
+
 # process clicks
 # pressed
 # - mouse hovering, mouse_down
@@ -580,195 +598,3 @@ class PositionedUINode:
 MouseEventTypes = Literal['mouseenter', 'mouseleave', 'press', 'click']
 
 
-def init_node(node: UINode, dest_top_left: Vector2 | Callable[[UINode], Vector2]):
-  """
-    dest_top_left: top_left to blit node, or a function which returns one\n
-    calculate metadata about the UINode, and return a drawable
-  """
-  node.calc_width_height()
-  if isinstance(dest_top_left, Callable):
-    dest_top_left = dest_top_left(node)
-  return node.get_drawable(dest_top_left)
-
-
-
-class UILayer:
-  """
-    controller for the UI
-  """
-  def __init__(self, global_state: StateManager, engine: Any) -> None:        
-    self.global_state = global_state
-    
-    options = Container(
-      direction='col',
-      child_spacing=0,
-      padding=0,
-      children=[
-        Container(
-          child_alignment='space_between',
-          min_width=300,
-          padding=2,
-          children=[
-            MySurface(
-              label('select mode', 'Arial', 15)
-            )
-          ]
-        ),
-        Container(
-          children=[
-            ButtonWith(
-              text='add',
-              font_size=20,
-              gap=10,
-              background_color=lambda: (255, 200, 200, 255) if isinstance(global_state.current_state, Add) else (200, 200, 200, 255),
-              on_click=lambda e, n: global_state.set_state(Add('triangle')),
-              dropdown_content=Container(
-                background_color=Controlled((230, 230, 230, 255)),
-                child_alignment='left',
-                children=[
-                  Container(
-                    padding=10,
-                    background_color=(200, 200, 200, 255),
-                    children=[
-                      MySurface(
-                        surface=circle_graphic(50),
-                        show_outline= lambda: isinstance(global_state.current_state, Add) and global_state.current_state.selected_object == 'circle',
-                        on_click= lambda e, n: global_state.set_state(Add('circle'))
-                      ),
-                      MySurface(
-                        surface=triangle_graphic(50),
-                        show_outline= lambda : isinstance(global_state.current_state, Add) and global_state.current_state.selected_object == 'triangle',
-                        on_click = lambda e, n:global_state.set_state(Add('triangle'))
-                      ),
-                      MySurface(
-                        surface=square_graphic(50),
-                        show_outline=lambda: isinstance(global_state.current_state, Add) and global_state.current_state.selected_object == 'square',
-                        on_click=lambda e, n: global_state.set_state(Add('square'))
-                      )
-                    ]
-                  ),
-                  ButtonWith(
-                    text='more..',
-                    dropdown_content=None,
-                    font_size=20
-                  )
-                ],
-                padding=10,
-                child_spacing=10
-              ),
-            ),
-            ButtonWith(
-              text='drag',
-              font_size=20,
-              background_color=lambda: (255, 200, 200, 255) if isinstance(global_state.current_state, Drag) else (200, 200, 200, 255),
-              on_click=lambda e,n: global_state.set_state(Drag()),
-              dropdown_content=None
-            ),
-            ButtonWith(
-              text='delete',
-              font_size=20,
-              background_color=lambda: (255, 200, 200, 255) if isinstance(global_state.current_state, Delete) else (200, 200, 200, 255),
-              on_click=lambda e,n: global_state.set_state(Delete()),
-              dropdown_content=None
-            ),
-            ButtonWith(
-              text='clear..', 
-              font_size=20, 
-              gap=10,
-              dropdown_content=Container(
-                direction='col',
-                children=[
-                  ButtonWith(text='movable items', font_size=20, dropdown_content=None, on_click=lambda e, n: engine.remove_movable_bodies()),
-                  ButtonWith(text='all items', font_size=20, dropdown_content=None),
-                ],
-                background_color=(230, 230, 230, 255),
-                min_height=300,
-                padding=5
-              )
-            )
-          ],
-          child_alignment='right',
-          background_color=(230, 230, 230, 255),
-          padding=5,
-          min_width=300
-        )
-      ]
-    )
-    options = PositionedUINode(
-      options,
-      lambda n: Vector2(SCREEN_WIDTH - n.width_height[0] - 20, 20)
-    )
-    load_save = Container(
-      child_alignment='left',
-      background_color=(230, 230, 230, 255),
-      padding=5,
-      min_width=300,
-      children=[
-        ButtonWith(
-          text='load',
-          dropdown_content=None,
-        ),
-        ButtonWith(
-          text='save',
-          dropdown_content=None
-        ),
-      ]
-    )
-    load_save = PositionedUINode(load_save, Vector2(20, 20))
-    self.positioned_nodes = [options, load_save]
-
-  def handle_input(self, mouse_event: MouseEvent):
-    """
-      consume the mouse_event. \n
-      return the mouse_event if unconsumed, else noen
-    """
-    best = None
-    for p_node in self.positioned_nodes:
-      best = p_node.node.get_best_hitbox(mouse_event)
-      if best:
-        break
-    
-    all_hitboxes = [h for p_node in self.positioned_nodes for h in p_node.node.get_all_hitboxes()]
-    for h in all_hitboxes:
-      h.update_mouse_over(mouse_event, h == best)
-    
-    return mouse_event if (best == None) else None
-  
-  def draw(self, surface: Surface):
-    for p_node in self.positioned_nodes:
-      p_node.draw_node(surface)
-  
-  # for debugging, draw only UI layer
-  def play(self):
-    
-    self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    self.clock = pygame.time.Clock()
-    self.running = True
-    self.mouse_down = False
-    while self.running:      
-      mouse_pos_frame = Vector2(pygame.mouse.get_pos())
-      mouse_event: MouseEvent = MouseEvent(mouse_pos_frame, set())
-      
-      for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-          self.running = False
-          
-        if event.type == pygame.MOUSEBUTTONDOWN:
-          mouse_event.types.add('mousedown')
-          self.mouse_down = True
-        
-        if event.type == pygame.MOUSEBUTTONUP:
-          mouse_event.types.add('mouseup')
-          self.mouse_down = False
-
-      # process mouse events
-      self.handle_input(mouse_event)
-      
-      # draw nodes
-      self.screen.fill((255, 255, 255))
-      for x in range(0, SCREEN_WIDTH, 50):
-        pygame.draw.line(self.screen, (200, 200, 200), Vector2(x, 0), Vector2(x, SCREEN_HEIGHT))
-        
-      self.draw(self.screen)
-      pygame.display.flip()
-      self.clock.tick(60)

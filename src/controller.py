@@ -11,8 +11,8 @@ from classes import Polygon
 from engine import Engine
 from helper import get_square, rot_90_c, screen_to_world, world_to_screen
 from copy import deepcopy
-from input import MouseEvent
-from ui import UILayer, label
+from ui_lib2 import MouseEvent
+from ui2 import UILayer
 
 
 # each object has a 'click' event handler
@@ -46,8 +46,6 @@ class Controller:
           Vector2(0, 100) + Vector2(400, y)
         ]
       )
-      
-    
     self.ui_layer = UILayer(self.global_state, self.engine)
   
   def debug_mode(self):
@@ -140,7 +138,7 @@ class Controller:
     self.running = True
     while self.running:
       mouse_pos_frame = Vector2(pygame.mouse.get_pos())
-      mouse_event: MouseEvent = MouseEvent(mouse_pos_frame, set())
+      mouse_event: MouseEvent = MouseEvent(mouse_pos_frame, 'none')
 
       for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -148,10 +146,10 @@ class Controller:
           break
         
         if event.type == pygame.MOUSEBUTTONDOWN:
-          mouse_event.types.add('mousedown')
+          mouse_event.type = 'mousedown'
         
         if event.type == pygame.MOUSEBUTTONUP:
-          mouse_event.types.add('mouseup')
+          mouse_event.type = 'mouseup'
         
         if event.type == pygame.KEYDOWN:
           # clear 
@@ -164,22 +162,15 @@ class Controller:
       # - first, make the UI consume the click / hover / mousedown / mouseup
       # - then, if still there, pass on to the engine
       
-      # engine preupdate
-      # - tell the engine all the events that have occured
-      # - so, clicks transformed into world coordinates
-      # - also any unconsumed hover, make the color change or something
       mouse_event_2 = self.ui_layer.handle_input(mouse_event)
       self.engine.handle_input(mouse_event_2)
       
-      # draw items      
+      # draw items
       self.screen.fill('white')
 
       self.engine.draw(self.screen)
       self.ui_layer.draw(self.screen)
-      
-      # reset to false
-      self.global_state.changed_frame = False
-      
+            
       self.engine.update(1 / 60)
       pygame.display.flip()
       self.clock.tick(60)
@@ -187,5 +178,7 @@ class Controller:
     pygame.quit()
 
 if __name__ == '__main__':
+  gsm = StateManager()
+  e = Engine(gsm)
   l = Controller()
   l.play()
